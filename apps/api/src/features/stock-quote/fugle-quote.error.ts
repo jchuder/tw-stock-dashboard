@@ -7,6 +7,8 @@ export class FugleConfigError extends Data.TaggedError('FugleConfigError') {}
 
 export class FugleNetworkError extends Data.TaggedError('FugleNetworkError') {}
 
+export class FugleTimeoutError extends Data.TaggedError('FugleTimeoutError') {}
+
 export class FugleHttpError extends Data.TaggedError('FugleHttpError')<{
   readonly status: number;
 }> {}
@@ -15,4 +17,9 @@ export class FugleDecodeError extends Data.TaggedError('FugleDecodeError')<{
   readonly stage: 'json' | 'schema';
 }> {}
 
-export type FugleQuoteError = FugleConfigError | FugleNetworkError | FugleHttpError | FugleDecodeError;
+export type FugleQuoteError =
+  | FugleConfigError
+  | FugleNetworkError
+  | FugleTimeoutError
+  | FugleHttpError
+  | FugleDecodeError;

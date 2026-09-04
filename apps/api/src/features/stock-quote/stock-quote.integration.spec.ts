@@ -96,7 +96,7 @@ describe('GET /api/stocks/:symbol/quote', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/2330',
-      { headers: { 'X-API-KEY': 'test-api-key' } },
+      { headers: { 'X-API-KEY': 'test-api-key' }, signal: expect.any(AbortSignal) },
     );
   });
 

@@ -1,4 +1,4 @@
-import { Effect, Either } from 'effect';
+import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
 
@@ -115,5 +115,31 @@ describe('FugleQuoteProvider typed failures', () => {
       expect(result.left._tag).toBe('FugleDecodeError');
       expect(result.left).toMatchObject({ stage: 'schema' });
     }
+  });
+
+  it('fails FugleTimeoutError and aborts fetch after 3s of silence', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    let captured: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_input: unknown, init?: { signal?: AbortSignal }) => {
+        captured = init?.signal;
+        return new Promise<Response>(() => {});
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.fork(Effect.either(new FugleQuoteProvider().getQuote('2330')));
+        yield* TestClock.adjust('3 seconds');
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestContext.TestContext)),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleTimeoutError');
+    }
+    expect(captured?.aborted).toBe(true);
   });
 });

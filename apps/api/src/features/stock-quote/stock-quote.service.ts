@@ -27,11 +27,12 @@ export class StockQuoteService {
   }
 }
 
-// Feature-local eligibility: transient/provider failures fall back, config
-// and client errors do not. No generic policy engine.
+// Feature-local eligibility: transient/provider failures (including timeout)
+// fall back, config and client errors do not. No generic policy engine.
 export function isFugleFallbackEligible(error: FugleQuoteError): boolean {
   switch (error._tag) {
     case 'FugleNetworkError':
+    case 'FugleTimeoutError':
     case 'FugleDecodeError':
       return true;
     case 'FugleConfigError':

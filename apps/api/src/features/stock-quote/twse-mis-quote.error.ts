@@ -4,6 +4,8 @@ import { Data } from 'effect';
 // response body, no headers, no raw causes travel in the error channel.
 export class TwseMisNetworkError extends Data.TaggedError('TwseMisNetworkError') {}
 
+export class TwseMisTimeoutError extends Data.TaggedError('TwseMisTimeoutError') {}
+
 export class TwseMisHttpError extends Data.TaggedError('TwseMisHttpError')<{
   readonly status: number;
 }> {}
@@ -12,4 +14,8 @@ export class TwseMisDecodeError extends Data.TaggedError('TwseMisDecodeError')<{
   readonly stage: 'json' | 'schema' | 'value';
 }> {}
 
-export type TwseMisQuoteError = TwseMisNetworkError | TwseMisHttpError | TwseMisDecodeError;
+export type TwseMisQuoteError =
+  | TwseMisNetworkError
+  | TwseMisTimeoutError
+  | TwseMisHttpError
+  | TwseMisDecodeError;

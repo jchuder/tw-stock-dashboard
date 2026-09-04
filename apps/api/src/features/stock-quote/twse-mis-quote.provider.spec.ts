@@ -1,7 +1,6 @@
-import { Effect, Either } from 'effect';
+import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
-
 const TSE_ENTRY = { c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' };
 
 function okOnce(body: unknown, status = 200): void {
@@ -60,6 +59,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('TwseMisDecodeError');
       expect(result.left).toMatchObject({ stage: 'json' });
     }
   });
@@ -109,5 +109,30 @@ describe('TwseMisQuoteProvider typed failures', () => {
       expect(result.left._tag).toBe('TwseMisHttpError');
       expect(result.left).toMatchObject({ status: 503 });
     }
+  });
+
+  it('fails TwseMisTimeoutError and aborts fetch after 3s of silence', async () => {
+    let captured: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_input: unknown, init?: { signal?: AbortSignal }) => {
+        captured = init?.signal;
+        return new Promise<Response>(() => {});
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.fork(Effect.either(new TwseMisQuoteProvider().getQuote('2330')));
+        yield* TestClock.adjust('3 seconds');
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestContext.TestContext)),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('TwseMisTimeoutError');
+    }
+    expect(captured?.aborted).toBe(true);
   });
 });

@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { Effect, Schema } from 'effect';
+import { Duration, Effect, Schema } from 'effect';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import { StockQuoteResponseSchema } from '@tw-stock-dashboard/contracts';
 import type { QuoteProvider } from './quote-provider.js';
-import { TwseMisDecodeError, TwseMisHttpError, TwseMisNetworkError } from './twse-mis-quote.error.js';
+import { TwseMisDecodeError, TwseMisHttpError, TwseMisNetworkError, TwseMisTimeoutError } from './twse-mis-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteSchema, parseFiniteNumber, round2 } from './twse-mis-quote.schema.js';
+import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 const TWSE_MIS_URL = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
 
@@ -17,10 +18,15 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
       // query both tse_ and otc_ and pick the entry matching the symbol.
       const encoded = encodeURIComponent(symbol);
       const response = yield* Effect.tryPromise({
-        try: () =>
-          fetch(`${TWSE_MIS_URL}?ex_ch=tse_${encoded}.tw|otc_${encoded}.tw&json=1&delay=0`),
+        try: (signal) =>
+          fetch(`${TWSE_MIS_URL}?ex_ch=tse_${encoded}.tw|otc_${encoded}.tw&json=1&delay=0`, { signal }),
         catch: () => new TwseMisNetworkError(),
-      });
+      }).pipe(
+        Effect.timeoutFail({
+          duration: Duration.millis(UPSTREAM_TIMEOUT_MS),
+          onTimeout: () => new TwseMisTimeoutError(),
+        }),
+      );
       if (!response.ok) {
         return yield* new TwseMisHttpError({ status: response.status });
       }
