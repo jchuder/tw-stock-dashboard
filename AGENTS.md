@@ -27,7 +27,14 @@
 - Use latest LTS where an official LTS channel exists. Otherwise use latest stable.
 - No alpha/beta/RC/canary/next dependencies.
 - Peer-compatibility downgrades require an ADR or code comment explaining why.
-- Commit message: semantic prefix, present tense, English, ≤100 chars.
+- Commit messages follow the global `commit` skill: semantic type, imperative English subject, ≤100-character header.
+
+## Git Workflow
+
+- `main` is release-controlled. Merge `dev` into `main` only when the user explicitly decides to release.
+- Start all development from `dev` on a focused branch named by the global `git-branch-naming` skill.
+- Complete acceptance, review, and verification on the feature branch, then merge it into `dev`.
+- Keep unrelated work in separate feature branches and commits.
 
 ## Scope
 
