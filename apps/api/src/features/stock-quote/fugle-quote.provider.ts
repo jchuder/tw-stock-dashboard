@@ -2,14 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Effect, Schema } from 'effect';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import { StockQuoteResponseSchema } from '@tw-stock-dashboard/contracts';
-import { FugleConfigError, FugleDecodeError, FugleHttpError, FugleNetworkError } from './fugle-quote.error.js';
 import type { FugleQuoteError } from './fugle-quote.error.js';
+import { FugleConfigError, FugleDecodeError, FugleHttpError, FugleNetworkError } from './fugle-quote.error.js';
 import { FugleQuoteSchema } from './fugle-quote.schema.js';
-
+import type { QuoteProvider } from './quote-provider.js';
 const FUGLE_QUOTE_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote';
 
 @Injectable()
-export class FugleQuoteProvider {
+export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
   getQuote(symbol: string): Effect.Effect<StockQuoteResponse, FugleQuoteError> {
     return Effect.gen(function* () {
       const apiKey = process.env.FUGLE_API_KEY;

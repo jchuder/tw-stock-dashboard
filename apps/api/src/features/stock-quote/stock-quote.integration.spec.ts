@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { StockQuoteModule } from './stock-quote.module.js';
 
 // Trimmed Fugle intraday quote fixture (official example values for 2330,
@@ -40,6 +41,31 @@ function mockFugle(status: number, body: unknown): void {
   );
 }
 
+const MIS_FIXTURE = {
+  msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }],
+};
+
+// Route-aware upstream stub: Fugle and TWSE MIS get independent behaviors so
+// the fallback matrix can assert both the response and who was (not) called.
+function mockUpstreams(fugle: Response | Error, mis: Response | Error | null) {
+  const fetchMock = vi.fn(async (input: unknown) => {
+    const picked = String(input).includes('api.fugle.tw') ? fugle : mis;
+    if (picked === null || picked instanceof Error) {
+      throw picked ?? new Error('unexpected upstream call');
+    }
+    return picked;
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function callsTo(fetchMock: Mock, host: string): number {
+  return fetchMock.mock.calls.filter(([input]) => String(input).includes(host)).length;
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status });
+}
 describe('GET /api/stocks/:symbol/quote', () => {
   let app: INestApplication;
 
@@ -114,6 +140,74 @@ describe('GET /api/stocks/:symbol/quote', () => {
   it('fails safe on unknown upstream exchange instead of defaulting market', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockFugle(200, { ...FUGLE_FIXTURE, exchange: 'UNKNOWN' });
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+
+    expect(res.body).toEqual(GENERIC_FAILURE);
+  });
+
+  it('falls back to MIS on Fugle network failure', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = mockUpstreams(new Error('boom'), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+
+    expect(res.body).toEqual(EXPECTED_BODY);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
+      'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_2330.tw|otc_2330.tw&json=1&delay=0',
+    );
+  });
+
+  it('falls back to MIS on Fugle 429', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockUpstreams(jsonResponse({ message: 'rate limited' }, 429), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+
+    expect(res.body).toEqual(EXPECTED_BODY);
+  });
+
+  it('falls back to MIS on Fugle 503', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockUpstreams(jsonResponse({ message: 'downstream' }, 503), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+
+    expect(res.body).toEqual(EXPECTED_BODY);
+  });
+
+  it('falls back to MIS on Fugle invalid schema', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockUpstreams(jsonResponse({ bogus: true }), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+
+    expect(res.body).toEqual(EXPECTED_BODY);
+  });
+
+  it('does not fall back on Fugle 401', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = mockUpstreams(jsonResponse({ message: 'unauthorized' }, 401), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+
+    expect(res.body).toEqual(GENERIC_FAILURE);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+
+  it('does not call any upstream without FUGLE_API_KEY', async () => {
+    const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+
+    expect(res.body).toEqual(GENERIC_FAILURE);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns generic 500 when both Fugle and MIS fail', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockUpstreams(jsonResponse({ message: 'rate limited' }, 429), jsonResponse({ message: 'down' }, 503));
 
     const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
 
