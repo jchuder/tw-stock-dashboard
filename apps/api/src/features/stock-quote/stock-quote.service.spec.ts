@@ -214,4 +214,34 @@ describe('StockQuoteService TTL cache', () => {
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
+
+  it('starts TTL at cache insertion, not request start', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('api.fugle.tw')) {
+        return new Promise<Response>(() => {});
+      }
+      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const svc = service();
+
+    // t=0 request, +3s Fugle timeout, MIS immediate success (cached at t=3s),
+    // +4s second request: total t=7s, but only 4s after insertion -> HIT.
+    const [first, second] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const f1 = yield* Effect.fork(Effect.either(svc.getQuote('2330')));
+        yield* TestClock.adjust('3 seconds');
+        const r1 = yield* Fiber.join(f1);
+        yield* TestClock.adjust('4 seconds');
+        const r2 = yield* Effect.either(svc.getQuote('2330'));
+        return [r1, r2] as const;
+      }).pipe(Effect.provide(TestContext.TestContext)),
+    );
+
+    expect(first).toEqual(Either.right(EXPECTED_BODY));
+    expect(second).toEqual(Either.right(EXPECTED_BODY));
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
+  });
 });

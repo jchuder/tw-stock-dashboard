@@ -23,8 +23,8 @@ export class StockQuoteService {
 
   getQuote(symbol: string): Effect.Effect<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError> {
     return Effect.gen(this, function* () {
-      const now = yield* Clock.currentTimeMillis;
-      const hit = this.cache.get(symbol, now);
+      const lookupTime = yield* Clock.currentTimeMillis;
+      const hit = this.cache.get(symbol, lookupTime);
       if (hit) {
         return hit;
       }
@@ -34,7 +34,10 @@ export class StockQuoteService {
             isFugleFallbackEligible(error) ? this.twseMisQuoteProvider.getQuote(symbol) : Effect.fail(error),
         ),
       );
-      this.cache.set(symbol, quote, now);
+      // TTL starts when the successful quote enters the cache, not when the
+      // request started: a 3s Fugle timeout + slow MIS must not pre-expire it.
+      const cachedAt = yield* Clock.currentTimeMillis;
+      this.cache.set(symbol, quote, cachedAt);
       return quote;
     });
   }
