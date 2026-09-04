@@ -101,4 +101,22 @@ describe('GET /api/stocks/:symbol/quote', () => {
 
     expect(res.body).toEqual(GENERIC_FAILURE);
   });
+
+  it('maps TPEx exchange to TPEX market', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockFugle(200, { ...FUGLE_FIXTURE, symbol: '9999', exchange: 'TPEx' });
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/9999/quote').expect(200);
+
+    expect(res.body).toEqual({ ...EXPECTED_BODY, symbol: '9999', market: 'TPEX' });
+  });
+
+  it('fails safe on unknown upstream exchange instead of defaulting market', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockFugle(200, { ...FUGLE_FIXTURE, exchange: 'UNKNOWN' });
+
+    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+
+    expect(res.body).toEqual(GENERIC_FAILURE);
+  });
 });

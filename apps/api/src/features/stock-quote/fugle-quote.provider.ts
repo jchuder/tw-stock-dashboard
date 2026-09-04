@@ -48,7 +48,7 @@ export class FugleQuoteProvider {
     const validated = Schema.decodeUnknownEither(StockQuoteResponseSchema)({
       symbol: fugle.symbol,
       name: fugle.name,
-      market: fugle.exchange.toUpperCase() === 'TWSE' ? 'TWSE' : 'TPEX',
+      market: fugle.exchange === 'TWSE' ? 'TWSE' : 'TPEX',
       price: fugle.lastPrice,
       previousClose: fugle.previousClose,
       change: fugle.change,

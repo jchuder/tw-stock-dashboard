@@ -6,7 +6,10 @@ import { Schema } from 'effect';
 export const FugleQuoteSchema = Schema.Struct({
   symbol: Schema.String,
   name: Schema.String,
-  exchange: Schema.String,
+  // Fugle intraday quote only serves TWSE / TPEx listings. Anything else
+  // (unknown future value, broken payload) must fail decode -> generic 500,
+  // never silently normalize into a market.
+  exchange: Schema.Literal('TWSE', 'TPEx'),
   lastPrice: Schema.Number,
   previousClose: Schema.Number,
   change: Schema.Number,
