@@ -4,7 +4,7 @@ import { StockQuoteResponseSchema } from '@tw-stock-dashboard/contracts';
 import { API_BASE_URL } from '../../../shared/api/base-url.js';
 
 export async function fetchStockQuote(symbol: string): Promise<StockQuoteResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/quote`);
+  const res = await fetch(`${API_BASE_URL}/api/v1/stocks/${encodeURIComponent(symbol)}/quote`);
   if (!res.ok) {
     throw new Error(`Stock quote request failed: ${res.status}`);
   }

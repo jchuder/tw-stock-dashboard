@@ -1,7 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, JSX } from 'react';
+import { toast } from 'sonner';
 import { fetchStockQuote } from '../api/stock-quote.api.js';
+
+const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
+const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
+
+const PROVIDER_LABELS = {
+  fugle: 'Fugle',
+  'twse-mis': 'TWSE MIS',
+} as const;
 
 function formatSigned(value: number, suffix = ''): string {
   return `${value >= 0 ? '+' : ''}${value}${suffix}`;
@@ -10,6 +19,7 @@ function formatSigned(value: number, suffix = ''): string {
 export function StockQuotePanel(): JSX.Element {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState<string | null>(null);
+  const previousProvider = useRef<'fugle' | 'twse-mis' | null>(null);
   const quote = useQuery({
     queryKey: ['stock-quote', submitted],
     queryFn: () => {
@@ -22,13 +32,42 @@ export function StockQuotePanel(): JSX.Element {
     retry: false,
   });
 
+  useEffect(() => {
+    const data = quote.data;
+    // A cache hit only replays an earlier provenance: badge, never a
+    // transition toast. The ref stays untouched so the next live response
+    // still compares against the last live provider.
+    if (!data || data.source.cacheHit) {
+      return;
+    }
+    const current = data.source.provider;
+    const previous = previousProvider.current;
+    if (previous === null && current === 'twse-mis' && data.source.fallbackUsed) {
+      toast(FALLBACK_TOAST, { duration: 5000 });
+    } else if (previous === 'fugle' && current === 'twse-mis') {
+      toast(FALLBACK_TOAST, { duration: 5000 });
+    } else if (previous === 'twse-mis' && current === 'fugle') {
+      toast(RECOVERY_TOAST, { duration: 5000 });
+    }
+    previousProvider.current = current;
+  }, [quote.data]);
+
   const onSubmit = (event: FormEvent): void => {
     event.preventDefault();
     const symbol = input.trim();
-    if (symbol.length > 0) {
-      setSubmitted(symbol);
+    if (symbol.length === 0) {
+      return;
     }
+    // Re-submitting the same symbol must still refresh: the query key would
+    // otherwise be unchanged and nothing would refetch.
+    if (symbol === submitted) {
+      void quote.refetch();
+      return;
+    }
+    setSubmitted(symbol);
   };
+
+  const source = quote.data?.source;
 
   return (
     <section>
@@ -43,7 +82,7 @@ export function StockQuotePanel(): JSX.Element {
       </form>
       {quote.isPending && submitted !== null && <p>載入中…</p>}
       {quote.isError && <p>查詢失敗，請稍後再試</p>}
-      {quote.isSuccess && (
+      {quote.isSuccess && source && (
         <div>
           <p>
             {quote.data.symbol} {quote.data.name}
@@ -51,6 +90,9 @@ export function StockQuotePanel(): JSX.Element {
           <p>{quote.data.price}</p>
           <p>{formatSigned(quote.data.change)}</p>
           <p>{formatSigned(quote.data.changePercent, '%')}</p>
+          <p>資料來源：{PROVIDER_LABELS[source.provider]}</p>
+          {source.cacheHit && <p>快取</p>}
+          {source.asOf !== null && <p>資料時間：{new Date(source.asOf).toLocaleString()}</p>}
         </div>
       )}
     </section>
