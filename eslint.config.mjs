@@ -6,6 +6,7 @@ import boundaries from 'eslint-plugin-boundaries';
 import tseslint from 'typescript-eslint';
 
 const webLayers = ['web-app', 'web-widgets', 'web-feature', 'web-entity', 'web-core', 'web-shared'];
+const apiLayers = ['api-app', 'api-feature'];
 
 export default tseslint.config(
   {
@@ -21,9 +22,8 @@ export default tseslint.config(
         { type: 'web-feature', pattern: 'apps/web/src/features/*', capture: ['feature'] },
         { type: 'web-entity', pattern: 'apps/web/src/entities/*', capture: ['entity'] },
         { type: 'web-core', pattern: 'apps/web/src/core' },
-        { type: 'web-shared', pattern: 'apps/web/src/shared' },
-        { type: 'api', pattern: 'apps/api/src' },
-        { type: 'contracts', pattern: 'packages/contracts/src' },
+        { type: 'api-feature', pattern: 'apps/api/src/features/*', capture: ['feature'] },
+        { type: 'api-app', pattern: 'apps/api/src' },
       ],
       // Let boundaries resolve TypeScript ESM imports that use `.js` extensions
       // (e.g. `from '../shared/api/health.js'` → `health.ts`). Without this,
@@ -79,12 +79,16 @@ export default tseslint.config(
               allow: { to: { element: { type: 'web-shared' } } },
             },
             {
+              from: { element: { type: 'api-app' } },
+              allow: { to: { element: { type: 'api-feature' } } },
+            },
+            {
               from: { element: { types: { anyOf: webLayers } } },
-              disallow: { to: { element: { type: 'api' } } },
+              disallow: { to: { element: { types: { anyOf: apiLayers } } } },
               message: 'apps/web must not import apps/api source; share code via packages/contracts',
             },
             {
-              from: { element: { type: 'api' } },
+              from: { element: { types: { anyOf: apiLayers } } },
               disallow: { to: { element: { types: { anyOf: webLayers } } } },
               message: 'apps/api must not import apps/web source; share code via packages/contracts',
             },
