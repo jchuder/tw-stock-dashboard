@@ -64,6 +64,15 @@ describe('FugleQuoteProvider typed failures', () => {
     expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
   });
 
+  it('degrades out-of-range lastUpdated to null without throwing RangeError', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    okOnce({ ...VALID_UPSTREAM, lastUpdated: Number.MAX_VALUE });
+
+    const result = await run();
+
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+  });
+
   it('fails FugleConfigError when FUGLE_API_KEY is missing', async () => {
     const result = await run();
 

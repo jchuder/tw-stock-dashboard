@@ -11,6 +11,7 @@ import {
 } from './fugle-quote.error.js';
 import { FugleQuoteSchema } from './fugle-quote.schema.js';
 import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
+import { epochMsToIsoOrNull } from './timestamp.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 const FUGLE_QUOTE_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote';
@@ -68,12 +69,8 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
 // Fugle lastUpdated is a microsecond timestamp. Absent or malformed values
 // degrade to null — a missing freshness marker must never fail a valid quote.
 function toIsoOrNull(lastUpdated: unknown): string | null {
-  if (typeof lastUpdated !== 'number' || !Number.isFinite(lastUpdated) || lastUpdated <= 0) {
+  if (typeof lastUpdated !== 'number') {
     return null;
   }
-  const ms = Math.floor(lastUpdated / 1000);
-  if (!Number.isFinite(ms) || ms <= 0) {
-    return null;
-  }
-  return new Date(ms).toISOString();
+  return epochMsToIsoOrNull(Math.floor(lastUpdated / 1000));
 }

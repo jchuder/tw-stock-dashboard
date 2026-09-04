@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Duration, Effect, Schema } from 'effect';
 import { StockQuoteSchema } from '@tw-stock-dashboard/contracts';
 import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
+import { epochMsToIsoOrNull } from './timestamp.js';
 import { TwseMisDecodeError, TwseMisHttpError, TwseMisNetworkError, TwseMisTimeoutError } from './twse-mis-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteSchema, parseFiniteNumber, round2 } from './twse-mis-quote.schema.js';
@@ -66,8 +67,8 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
 // OpenAPI contract field. Malformed values degrade to null.
 function toIsoOrNull(tlong: unknown): string | null {
   const ms = typeof tlong === 'number' ? tlong : typeof tlong === 'string' ? parseFiniteNumber(tlong) : null;
-  if (ms === null || !Number.isFinite(ms) || ms <= 0) {
+  if (ms === null) {
     return null;
   }
-  return new Date(ms).toISOString();
+  return epochMsToIsoOrNull(ms);
 }

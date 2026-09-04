@@ -53,6 +53,14 @@ describe('TwseMisQuoteProvider typed failures', () => {
     expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
   });
 
+  it('degrades out-of-range tlong to null without throwing RangeError', async () => {
+    okOnce({ msgArray: [{ ...TSE_ENTRY, tlong: Number.MAX_VALUE }] });
+
+    const result = await run();
+
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+  });
+
   it('normalizes an otc entry to a TPEX quote without float noise', async () => {
     okOnce({ msgArray: [{ c: '9999', n: '測試', ex: 'otc', z: '100.1', y: '100' }] });
 
