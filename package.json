@@ -1,0 +1,26 @@
+{
+  "name": "tw-stock-dashboard",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r build && pnpm -r typecheck",
+    "test": "pnpm -r build && pnpm -r --parallel test",
+    "test:e2e": "pnpm build && playwright test",
+    "dev:api": "pnpm --filter @tw-stock-dashboard/api dev",
+    "dev:web": "pnpm --filter @tw-stock-dashboard/web dev"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "eslint": "^10.9.1",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-boundaries": "^7.2.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.69.0"
+  }
+}

@@ -1,0 +1,33 @@
+# tw-stock-dashboard
+
+Taiwan Stock Dashboard. Phase 0: project foundation — infrastructure tracer bullet only, no stock domain yet.
+
+## Topology
+
+```text
+apps/api            NestJS 12 API (GET /health)
+apps/web            React 19 + Vite 8 frontend
+packages/contracts  Shared API contracts (health only for now)
+e2e/                Playwright acceptance specs
+```
+
+## Prerequisites
+
+Node.js 24.20.0 LTS, pnpm 11.25.0 (`packageManager` + `engines` enforce this).
+
+## Scripts
+
+| Command           | What                                   |
+| ----------------- | -------------------------------------- |
+| `pnpm dev:api`    | API dev server (`http://localhost:3001`) |
+| `pnpm dev:web`    | Web dev server (`http://localhost:5173`) |
+| `pnpm build`      | Build all workspaces                   |
+| `pnpm lint`       | ESLint incl. architecture boundaries   |
+| `pnpm typecheck`  | Build then typecheck all workspaces    |
+| `pnpm test`       | Build then run all workspace tests     |
+| `pnpm test:e2e`   | Build then run Playwright acceptance   |
+
+## Version policy
+
+Latest LTS where an official LTS channel exists, otherwise latest stable. No pre-release
+dependencies. Peer-compatibility downgrades require an ADR or comment.
