@@ -1,62 +1,51 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { Schema } from 'effect';
+import { Injectable } from '@nestjs/common';
+import { Effect, Schema } from 'effect';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import { StockQuoteResponseSchema } from '@tw-stock-dashboard/contracts';
+import { FugleConfigError, FugleDecodeError, FugleHttpError, FugleNetworkError } from './fugle-quote.error.js';
+import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteSchema } from './fugle-quote.schema.js';
 
 const FUGLE_QUOTE_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote';
 
-// Generic failure: never leak the API key or the upstream body.
-const FAILURE_MESSAGE = 'Failed to fetch stock quote';
-
-function fail(): never {
-  throw new InternalServerErrorException(FAILURE_MESSAGE);
-}
-
 @Injectable()
 export class FugleQuoteProvider {
-  async getQuote(symbol: string): Promise<StockQuoteResponse> {
-    const apiKey = process.env.FUGLE_API_KEY;
-    if (!apiKey) {
-      fail();
-    }
+  getQuote(symbol: string): Effect.Effect<StockQuoteResponse, FugleQuoteError> {
+    return Effect.gen(function* () {
+      const apiKey = process.env.FUGLE_API_KEY;
+      if (!apiKey) {
+        return yield* new FugleConfigError();
+      }
 
-    let response: Response;
-    try {
-      response = await fetch(`${FUGLE_QUOTE_URL}/${encodeURIComponent(symbol)}`, {
-        headers: { 'X-API-KEY': apiKey },
+      const response = yield* Effect.tryPromise({
+        try: () =>
+          fetch(`${FUGLE_QUOTE_URL}/${encodeURIComponent(symbol)}`, {
+            headers: { 'X-API-KEY': apiKey },
+          }),
+        catch: () => new FugleNetworkError(),
       });
-    } catch {
-      fail();
-    }
-    if (!response.ok) {
-      fail();
-    }
+      if (!response.ok) {
+        return yield* new FugleHttpError({ status: response.status });
+      }
 
-    let raw: unknown;
-    try {
-      raw = (await response.json()) as unknown;
-    } catch {
-      fail();
-    }
-    const decoded = Schema.decodeUnknownEither(FugleQuoteSchema)(raw);
-    if (decoded._tag === 'Left') {
-      fail();
-    }
+      const raw = yield* Effect.tryPromise({
+        try: () => response.json() as Promise<unknown>,
+        catch: () => new FugleDecodeError({ stage: 'json' }),
+      });
+      const fugle = yield* Schema.decodeUnknown(FugleQuoteSchema)(raw).pipe(
+        Effect.mapError(() => new FugleDecodeError({ stage: 'schema' })),
+      );
 
-    const fugle = decoded.right;
-    const validated = Schema.decodeUnknownEither(StockQuoteResponseSchema)({
-      symbol: fugle.symbol,
-      name: fugle.name,
-      market: fugle.exchange === 'TWSE' ? 'TWSE' : 'TPEX',
-      price: fugle.lastPrice,
-      previousClose: fugle.previousClose,
-      change: fugle.change,
-      changePercent: fugle.changePercent,
+      const normalized = yield* Schema.decodeUnknown(StockQuoteResponseSchema)({
+        symbol: fugle.symbol,
+        name: fugle.name,
+        market: fugle.exchange === 'TWSE' ? 'TWSE' : 'TPEX',
+        price: fugle.lastPrice,
+        previousClose: fugle.previousClose,
+        change: fugle.change,
+        changePercent: fugle.changePercent,
+      }).pipe(Effect.mapError(() => new FugleDecodeError({ stage: 'schema' })));
+      return normalized;
     });
-    if (validated._tag === 'Left') {
-      fail();
-    }
-    return validated.right;
   }
 }

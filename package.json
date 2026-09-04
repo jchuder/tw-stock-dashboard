@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "lint": "eslint .",
+    "lint": "eslint . && pnpm verify:boundaries",
     "typecheck": "pnpm -r build && pnpm -r typecheck",
     "test": "pnpm -r build && pnpm -r --parallel test",
     "test:e2e": "pnpm build && playwright test",
