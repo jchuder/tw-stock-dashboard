@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
+import { StockQuotePanel } from '../features/stock-quote/index.js';
 import { fetchHealth } from '../shared/api/health.js';
 
 export function App(): JSX.Element {
@@ -16,6 +17,7 @@ export function App(): JSX.Element {
     <main>
       <h1>Taiwan Stock Dashboard</h1>
       <p>{apiStatus}</p>
+      <StockQuotePanel />
     </main>
   );
 }
