@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r build && pnpm -r typecheck",
     "test": "pnpm -r build && pnpm -r --parallel test",
     "test:e2e": "pnpm build && playwright test",
+    "verify:boundaries": "node scripts/verify-boundaries.mjs",
     "dev:api": "pnpm --filter @tw-stock-dashboard/api dev",
     "dev:web": "pnpm --filter @tw-stock-dashboard/web dev"
   },

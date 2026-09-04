@@ -17,13 +17,18 @@ export default tseslint.config(
     plugins: { boundaries },
     settings: {
       'boundaries/elements': [
+        // NOTE: elementsSingleType defaults to first-match-wins. List deeper
+        // folder patterns before any descriptor whose subtree covers them
+        // (api-feature before api-app), or the parent silently swallows the child.
         { type: 'web-app', pattern: 'apps/web/src/app' },
         { type: 'web-widgets', pattern: 'apps/web/src/widgets/*', capture: ['widget'] },
         { type: 'web-feature', pattern: 'apps/web/src/features/*', capture: ['feature'] },
         { type: 'web-entity', pattern: 'apps/web/src/entities/*', capture: ['entity'] },
         { type: 'web-core', pattern: 'apps/web/src/core' },
+        { type: 'web-shared', pattern: 'apps/web/src/shared' },
         { type: 'api-feature', pattern: 'apps/api/src/features/*', capture: ['feature'] },
         { type: 'api-app', pattern: 'apps/api/src' },
+        { type: 'contracts', pattern: 'packages/contracts/src' },
       ],
       // Let boundaries resolve TypeScript ESM imports that use `.js` extensions
       // (e.g. `from '../shared/api/health.js'` → `health.ts`). Without this,
