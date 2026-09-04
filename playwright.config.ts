@@ -8,7 +8,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'node dist/src/main.js',
+      command: 'node dist/main.js',
       cwd: 'apps/api',
       port: 3001,
       reuseExistingServer: true,
