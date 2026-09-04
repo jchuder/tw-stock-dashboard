@@ -1,8 +1,9 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteModule } from './stock-quote.module.js';
 
 // Trimmed Fugle intraday quote fixture (official example values for 2330,
@@ -79,6 +80,10 @@ describe('GET /api/stocks/:symbol/quote', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  beforeEach(() => {
+    app.get(StockQuoteCache).clear();
   });
 
   afterEach(() => {
@@ -212,5 +217,16 @@ describe('GET /api/stocks/:symbol/quote', () => {
     const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
+  });
+
+  it('serves the second sequential GET from cache with one Fugle call', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async () => jsonResponse(FUGLE_FIXTURE));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200).expect(EXPECTED_BODY);
+    await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200).expect(EXPECTED_BODY);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
