@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Duration, Effect, Schema } from 'effect';
-import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
-import { StockQuoteResponseSchema } from '@tw-stock-dashboard/contracts';
-import type { QuoteProvider } from './quote-provider.js';
+import { StockQuoteSchema } from '@tw-stock-dashboard/contracts';
+import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
 import { TwseMisDecodeError, TwseMisHttpError, TwseMisNetworkError, TwseMisTimeoutError } from './twse-mis-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteSchema, parseFiniteNumber, round2 } from './twse-mis-quote.schema.js';
@@ -12,7 +11,7 @@ const TWSE_MIS_URL = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
 
 @Injectable()
 export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
-  getQuote(symbol: string): Effect.Effect<StockQuoteResponse, TwseMisQuoteError> {
+  getQuote(symbol: string): Effect.Effect<QuoteProviderResult, TwseMisQuoteError> {
     return Effect.gen(function* () {
       // No stock-universe feature exists, so never guess the listing market:
       // query both tse_ and otc_ and pick the entry matching the symbol.
@@ -49,7 +48,7 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
         return yield* new TwseMisDecodeError({ stage: 'value' });
       }
 
-      const normalized = yield* Schema.decodeUnknown(StockQuoteResponseSchema)({
+      const quote = yield* Schema.decodeUnknown(StockQuoteSchema)({
         symbol: entry.c,
         name: entry.n,
         market: entry.ex === 'tse' ? 'TWSE' : 'TPEX',
@@ -58,7 +57,17 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
         change: round2(price - previousClose),
         changePercent: round2(((price - previousClose) / previousClose) * 100),
       }).pipe(Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })));
-      return normalized;
+      return { quote, asOf: toIsoOrNull(entry.tlong) };
     });
   }
+}
+
+// MIS tlong is a runtime-observed epoch-milliseconds string, not a formal
+// OpenAPI contract field. Malformed values degrade to null.
+function toIsoOrNull(tlong: unknown): string | null {
+  const ms = typeof tlong === 'number' ? tlong : typeof tlong === 'string' ? parseFiniteNumber(tlong) : null;
+  if (ms === null || !Number.isFinite(ms) || ms <= 0) {
+    return null;
+  }
+  return new Date(ms).toISOString();
 }

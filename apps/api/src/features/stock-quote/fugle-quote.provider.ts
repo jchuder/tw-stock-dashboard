@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Duration, Effect, Schema } from 'effect';
-import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
-import { StockQuoteResponseSchema } from '@tw-stock-dashboard/contracts';
+import { StockQuoteSchema } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import {
   FugleConfigError,
@@ -11,14 +10,14 @@ import {
   FugleTimeoutError,
 } from './fugle-quote.error.js';
 import { FugleQuoteSchema } from './fugle-quote.schema.js';
-import type { QuoteProvider } from './quote-provider.js';
+import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 const FUGLE_QUOTE_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote';
 
 @Injectable()
 export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
-  getQuote(symbol: string): Effect.Effect<StockQuoteResponse, FugleQuoteError> {
+  getQuote(symbol: string): Effect.Effect<QuoteProviderResult, FugleQuoteError> {
     return Effect.gen(function* () {
       const apiKey = process.env.FUGLE_API_KEY;
       if (!apiKey) {
@@ -52,7 +51,7 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
         Effect.mapError(() => new FugleDecodeError({ stage: 'schema' })),
       );
 
-      const normalized = yield* Schema.decodeUnknown(StockQuoteResponseSchema)({
+      const quote = yield* Schema.decodeUnknown(StockQuoteSchema)({
         symbol: fugle.symbol,
         name: fugle.name,
         market: fugle.exchange === 'TWSE' ? 'TWSE' : 'TPEX',
@@ -61,7 +60,20 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
         change: fugle.change,
         changePercent: fugle.changePercent,
       }).pipe(Effect.mapError(() => new FugleDecodeError({ stage: 'schema' })));
-      return normalized;
+      return { quote, asOf: toIsoOrNull(fugle.lastUpdated) };
     });
   }
+}
+
+// Fugle lastUpdated is a microsecond timestamp. Absent or malformed values
+// degrade to null — a missing freshness marker must never fail a valid quote.
+function toIsoOrNull(lastUpdated: unknown): string | null {
+  if (typeof lastUpdated !== 'number' || !Number.isFinite(lastUpdated) || lastUpdated <= 0) {
+    return null;
+  }
+  const ms = Math.floor(lastUpdated / 1000);
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return null;
+  }
+  return new Date(ms).toISOString();
 }

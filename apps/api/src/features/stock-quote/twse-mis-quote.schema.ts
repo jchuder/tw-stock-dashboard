@@ -3,6 +3,8 @@ import { Schema } from 'effect';
 // Feature-local TWSE MIS public market-data endpoint shape
 // (mis.twse.com.tw/stock/api/getStockInfo.jsp — a public JSON endpoint,
 // NOT the TWSE OpenAPI). Decode only the fields Q3 needs.
+// tlong stays Unknown: it is runtime-observed, not formally contracted —
+// a malformed freshness marker degrades to asOf null, never fails the quote.
 export const TwseMisQuoteSchema = Schema.Struct({
   msgArray: Schema.Array(
     Schema.Struct({
@@ -11,6 +13,7 @@ export const TwseMisQuoteSchema = Schema.Struct({
       ex: Schema.Literal('tse', 'otc'),
       z: Schema.String,
       y: Schema.String,
+      tlong: Schema.optional(Schema.Unknown),
     }),
   ),
 });

@@ -20,7 +20,7 @@ const FUGLE_FIXTURE = {
   serial: 6652422,
 };
 
-const EXPECTED_BODY = {
+const EXPECTED_QUOTE = {
   symbol: '2330',
   name: '台積電',
   market: 'TWSE',
@@ -34,6 +34,21 @@ const GENERIC_FAILURE = {
   message: 'Failed to fetch stock quote',
   error: 'Internal Server Error',
 };
+
+interface ExpectedSource {
+  provider: 'fugle' | 'twse-mis';
+  fallbackUsed: boolean;
+  cacheHit: boolean;
+  asOf: string | null;
+}
+
+// fetchedAt is clock-dependent: checked by ISO-UTC shape, everything else exact.
+function expectQuoteBody(body: unknown, quote: Record<string, unknown>, source: ExpectedSource): void {
+  expect(body).toMatchObject({ ...quote, source });
+  expect((body as { source: { fetchedAt: unknown } }).source.fetchedAt).toMatch(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+  );
+}
 
 function mockFugle(status: number, body: unknown): void {
   vi.stubGlobal(
@@ -67,7 +82,7 @@ function callsTo(fetchMock: Mock, host: string): number {
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
 }
-describe('GET /api/stocks/:symbol/quote', () => {
+describe('GET /api/v1/stocks/:symbol/quote', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
@@ -96,7 +111,14 @@ describe('GET /api/stocks/:symbol/quote', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(FUGLE_FIXTURE), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200).expect(EXPECTED_BODY);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'fugle',
+      fallbackUsed: false,
+      cacheHit: false,
+      asOf: null,
+    });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -109,7 +131,7 @@ describe('GET /api/stocks/:symbol/quote', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -119,7 +141,7 @@ describe('GET /api/stocks/:symbol/quote', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockFugle(429, { message: 'rate limited' });
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
   });
@@ -128,7 +150,7 @@ describe('GET /api/stocks/:symbol/quote', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockFugle(200, { bogus: true, serial: 1 });
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
   });
@@ -137,16 +159,20 @@ describe('GET /api/stocks/:symbol/quote', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockFugle(200, { ...FUGLE_FIXTURE, symbol: '9999', exchange: 'TPEx' });
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/9999/quote').expect(200);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/9999/quote').expect(200);
 
-    expect(res.body).toEqual({ ...EXPECTED_BODY, symbol: '9999', market: 'TPEX' });
+    expectQuoteBody(
+      res.body,
+      { ...EXPECTED_QUOTE, symbol: '9999', market: 'TPEX' },
+      { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null },
+    );
   });
 
   it('fails safe on unknown upstream exchange instead of defaulting market', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockFugle(200, { ...FUGLE_FIXTURE, exchange: 'UNKNOWN' });
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
   });
@@ -155,9 +181,14 @@ describe('GET /api/stocks/:symbol/quote', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     const fetchMock = mockUpstreams(new Error('boom'), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
-    expect(res.body).toEqual(EXPECTED_BODY);
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: null,
+    });
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
       'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_2330.tw|otc_2330.tw&json=1&delay=0',
@@ -168,34 +199,49 @@ describe('GET /api/stocks/:symbol/quote', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockUpstreams(jsonResponse({ message: 'rate limited' }, 429), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
-    expect(res.body).toEqual(EXPECTED_BODY);
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: null,
+    });
   });
 
   it('falls back to MIS on Fugle 503', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockUpstreams(jsonResponse({ message: 'downstream' }, 503), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
-    expect(res.body).toEqual(EXPECTED_BODY);
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: null,
+    });
   });
 
   it('falls back to MIS on Fugle invalid schema', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockUpstreams(jsonResponse({ bogus: true }), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
-    expect(res.body).toEqual(EXPECTED_BODY);
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: null,
+    });
   });
 
   it('does not fall back on Fugle 401', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     const fetchMock = mockUpstreams(jsonResponse({ message: 'unauthorized' }, 401), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
@@ -204,7 +250,7 @@ describe('GET /api/stocks/:symbol/quote', () => {
   it('does not call any upstream without FUGLE_API_KEY', async () => {
     const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -214,7 +260,7 @@ describe('GET /api/stocks/:symbol/quote', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockUpstreams(jsonResponse({ message: 'rate limited' }, 429), jsonResponse({ message: 'down' }, 503));
 
-    const res = await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
   });
@@ -224,9 +270,52 @@ describe('GET /api/stocks/:symbol/quote', () => {
     const fetchMock = vi.fn(async () => jsonResponse(FUGLE_FIXTURE));
     vi.stubGlobal('fetch', fetchMock);
 
-    await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200).expect(EXPECTED_BODY);
-    await request(app.getHttpServer()).get('/api/stocks/2330/quote').expect(200).expect(EXPECTED_BODY);
+    const first = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+    const second = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(first.body, EXPECTED_QUOTE, {
+      provider: 'fugle',
+      fallbackUsed: false,
+      cacheHit: false,
+      asOf: null,
+    });
+    expectQuoteBody(second.body, EXPECTED_QUOTE, {
+      provider: 'fugle',
+      fallbackUsed: false,
+      cacheHit: true,
+      asOf: null,
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+it('reports Fugle asOf from lastUpdated microseconds', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockFugle(200, { ...FUGLE_FIXTURE, lastUpdated: 1685338200000000 });
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'fugle',
+      fallbackUsed: false,
+      cacheHit: false,
+      asOf: '2023-05-29T05:30:00.000Z',
+    });
+  });
+
+  it('reports MIS asOf from tlong millis string', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockUpstreams(
+      jsonResponse({ message: 'rate limited' }, 429),
+      jsonResponse({ msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566', tlong: '1685338200000' }] }),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: '2023-05-29T05:30:00.000Z',
+    });
   });
 });

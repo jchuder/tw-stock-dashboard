@@ -35,13 +35,33 @@ describe('FugleQuoteProvider typed failures', () => {
     vi.unstubAllEnvs();
   });
 
-  it('returns Right StockQuoteResponse on valid payload', async () => {
+  it('returns Right quote result with null asOf when lastUpdated is absent', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     okOnce(VALID_UPSTREAM);
 
     const result = await run();
 
-    expect(result).toEqual(Either.right(EXPECTED_QUOTE));
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+  });
+
+  it('maps valid lastUpdated microseconds to asOf ISO', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    okOnce({ ...VALID_UPSTREAM, lastUpdated: 1685338200000000 });
+
+    const result = await run();
+
+    expect(result).toEqual(
+      Either.right({ quote: EXPECTED_QUOTE, asOf: '2023-05-29T05:30:00.000Z' }),
+    );
+  });
+
+  it('degrades malformed lastUpdated to null without failing the quote', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    okOnce({ ...VALID_UPSTREAM, lastUpdated: 'not-a-timestamp' });
+
+    const result = await run();
+
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
   });
 
   it('fails FugleConfigError when FUGLE_API_KEY is missing', async () => {

@@ -1,7 +1,18 @@
 import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
+
 const TSE_ENTRY = { c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' };
+
+const EXPECTED_QUOTE = {
+  symbol: '2330',
+  name: '台積電',
+  market: 'TWSE',
+  price: 568,
+  previousClose: 566,
+  change: 2,
+  changePercent: 0.35,
+};
 
 function okOnce(body: unknown, status = 200): void {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })));
@@ -16,22 +27,30 @@ describe('TwseMisQuoteProvider typed failures', () => {
     vi.unstubAllGlobals();
   });
 
-  it('normalizes a tse entry to a TWSE quote', async () => {
+  it('normalizes a tse entry to a TWSE quote with null asOf when tlong is absent', async () => {
     okOnce({ msgArray: [TSE_ENTRY] });
 
     const result = await run();
 
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+  });
+
+  it('maps valid tlong millis string to asOf ISO', async () => {
+    okOnce({ msgArray: [{ ...TSE_ENTRY, tlong: '1685338200000' }] });
+
+    const result = await run();
+
     expect(result).toEqual(
-      Either.right({
-        symbol: '2330',
-        name: '台積電',
-        market: 'TWSE',
-        price: 568,
-        previousClose: 566,
-        change: 2,
-        changePercent: 0.35,
-      }),
+      Either.right({ quote: EXPECTED_QUOTE, asOf: '2023-05-29T05:30:00.000Z' }),
     );
+  });
+
+  it('degrades malformed tlong to null without failing the quote', async () => {
+    okOnce({ msgArray: [{ ...TSE_ENTRY, tlong: 'yesterday-ish' }] });
+
+    const result = await run();
+
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
   });
 
   it('normalizes an otc entry to a TPEX quote without float noise', async () => {
@@ -41,13 +60,16 @@ describe('TwseMisQuoteProvider typed failures', () => {
 
     expect(result).toEqual(
       Either.right({
-        symbol: '9999',
-        name: '測試',
-        market: 'TPEX',
-        price: 100.1,
-        previousClose: 100,
-        change: 0.1,
-        changePercent: 0.1,
+        quote: {
+          symbol: '9999',
+          name: '測試',
+          market: 'TPEX',
+          price: 100.1,
+          previousClose: 100,
+          change: 0.1,
+          changePercent: 0.1,
+        },
+        asOf: null,
       }),
     );
   });

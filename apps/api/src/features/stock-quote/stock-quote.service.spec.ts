@@ -1,9 +1,12 @@
 import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
+import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteService } from './stock-quote.service.js';
+import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
@@ -18,7 +21,7 @@ const FUGLE_BODY = {
   changePercent: 0.35,
 };
 
-const EXPECTED_BODY = {
+const EXPECTED_QUOTE = {
   symbol: '2330',
   name: '台積電',
   market: 'TWSE',
@@ -27,6 +30,25 @@ const EXPECTED_BODY = {
   change: 2,
   changePercent: 0.35,
 };
+
+type QuoteResult = Either.Either<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError>;
+
+interface ExpectedSource {
+  provider: 'fugle' | 'twse-mis';
+  fallbackUsed: boolean;
+  cacheHit: boolean;
+  asOf: string | null;
+}
+
+// fetchedAt is clock-dependent, so it is checked by shape (ISO UTC) rather
+// than by value; every other field is asserted exactly.
+function expectRightQuote(result: QuoteResult, quote: Record<string, unknown>, source: ExpectedSource): void {
+  expect(Either.isRight(result)).toBe(true);
+  if (Either.isRight(result)) {
+    expect(result.right).toMatchObject({ ...quote, source });
+    expect(result.right.source.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  }
+}
 
 function service() {
   return new StockQuoteService(new FugleQuoteProvider(), new TwseMisQuoteProvider(), new StockQuoteCache());
@@ -62,7 +84,12 @@ describe('StockQuoteService timeout orchestration', () => {
       }).pipe(Effect.provide(TestContext.TestContext)),
     );
 
-    expect(result).toEqual(Either.right(EXPECTED_BODY));
+    expectRightQuote(result, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: null,
+    });
   });
 
   it('fails TwseMisTimeoutError when both upstreams hang', async () => {
@@ -109,8 +136,9 @@ describe('StockQuoteService TTL cache', () => {
       }).pipe(Effect.provide(TestContext.TestContext)),
     );
 
-    expect(first).toEqual(Either.right(EXPECTED_BODY));
-    expect(second).toEqual(Either.right(EXPECTED_BODY));
+    const fugleSource = { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null } as const;
+    expectRightQuote(first, EXPECTED_QUOTE, fugleSource);
+    expectRightQuote(second, EXPECTED_QUOTE, { ...fugleSource, cacheHit: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -129,8 +157,9 @@ describe('StockQuoteService TTL cache', () => {
       }).pipe(Effect.provide(TestContext.TestContext)),
     );
 
-    expect(first).toEqual(Either.right(EXPECTED_BODY));
-    expect(second).toEqual(Either.right(EXPECTED_BODY));
+    const fugleSource = { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null } as const;
+    expectRightQuote(first, EXPECTED_QUOTE, fugleSource);
+    expectRightQuote(second, EXPECTED_QUOTE, fugleSource);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -154,9 +183,10 @@ describe('StockQuoteService TTL cache', () => {
       }).pipe(Effect.provide(TestContext.TestContext)),
     );
 
-    expect(first).toEqual(Either.right(EXPECTED_BODY));
-    expect(second).toEqual(Either.right({ ...EXPECTED_BODY, symbol: '2454' }));
-    expect(third).toEqual(Either.right(EXPECTED_BODY));
+    const fugleSource = { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null } as const;
+    expectRightQuote(first, EXPECTED_QUOTE, fugleSource);
+    expectRightQuote(second, { ...EXPECTED_QUOTE, symbol: '2454' }, fugleSource);
+    expectRightQuote(third, EXPECTED_QUOTE, { ...fugleSource, cacheHit: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -185,7 +215,12 @@ describe('StockQuoteService TTL cache', () => {
     );
 
     expect(Either.isLeft(first)).toBe(true);
-    expect(second).toEqual(Either.right(EXPECTED_BODY));
+    expectRightQuote(second, EXPECTED_QUOTE, {
+      provider: 'fugle',
+      fallbackUsed: false,
+      cacheHit: false,
+      asOf: null,
+    });
     expect(calls).toBe(2);
   });
 
@@ -209,8 +244,9 @@ describe('StockQuoteService TTL cache', () => {
       }).pipe(Effect.provide(TestContext.TestContext)),
     );
 
-    expect(first).toEqual(Either.right(EXPECTED_BODY));
-    expect(second).toEqual(Either.right(EXPECTED_BODY));
+    const misSource = { provider: 'twse-mis', fallbackUsed: true, cacheHit: false, asOf: null } as const;
+    expectRightQuote(first, EXPECTED_QUOTE, misSource);
+    expectRightQuote(second, EXPECTED_QUOTE, { ...misSource, cacheHit: true });
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
@@ -239,8 +275,9 @@ describe('StockQuoteService TTL cache', () => {
       }).pipe(Effect.provide(TestContext.TestContext)),
     );
 
-    expect(first).toEqual(Either.right(EXPECTED_BODY));
-    expect(second).toEqual(Either.right(EXPECTED_BODY));
+    const misSource = { provider: 'twse-mis', fallbackUsed: true, cacheHit: false, asOf: null } as const;
+    expectRightQuote(first, EXPECTED_QUOTE, misSource);
+    expectRightQuote(second, EXPECTED_QUOTE, { ...misSource, cacheHit: true });
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
