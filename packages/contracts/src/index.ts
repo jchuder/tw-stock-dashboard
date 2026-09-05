@@ -6,3 +6,5 @@ export {
   StockQuoteSourceSchema,
 } from './stock-quote.js';
 export type { Market, StockQuote, StockQuoteResponse, StockQuoteSource } from './stock-quote.js';
+export { CandleSchema, HistoryRangeSchema, StockHistoryResponseSchema } from './stock-history.js';
+export type { Candle, HistoryRange, StockHistoryResponse } from './stock-history.js';

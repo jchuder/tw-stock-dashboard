@@ -1,5 +1,6 @@
 import { Controller, Get, Module } from '@nestjs/common';
 import type { HealthResponse } from '@tw-stock-dashboard/contracts';
+import { StockHistoryModule } from './features/stock-history/stock-history.module.js';
 import { StockQuoteModule } from './features/stock-quote/stock-quote.module.js';
 import { LoggerModule } from './libs/observability/logger.module.js';
 
@@ -12,7 +13,7 @@ class HealthController {
 }
 
 @Module({
-  imports: [LoggerModule, StockQuoteModule],
+  imports: [LoggerModule, StockHistoryModule, StockQuoteModule],
   controllers: [HealthController],
 })
 export class AppModule {}
