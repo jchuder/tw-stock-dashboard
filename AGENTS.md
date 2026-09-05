@@ -44,3 +44,10 @@
 
 - Never log secrets.
 - FUGLE_API_KEY and authorization credentials must always be redacted.
+- When diagnosing runtime failures:
+  1. Inspect the relevant deterministic tests.
+  2. Query SigNoz logs and traces when telemetry is available.
+  3. Correlate by request_id and trace_id.
+  4. Identify the failing boundary before changing code.
+  5. Do not infer an upstream failure when telemetry can verify it.
+  6. After a fix, rerun the relevant tests and verify telemetry if the failure was runtime-only.

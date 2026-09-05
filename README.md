@@ -32,6 +32,18 @@ Node.js 24.20.0 LTS, pnpm 11.25.0 (`packageManager` + `engines` enforce this).
 API logging defaults to `LOG_LEVEL=info` (JSON lines on stdout). Set `LOG_LEVEL`
 to `debug`, `warn`, or `error` to change verbosity. No config framework involved.
 
+To export OpenTelemetry traces/logs to self-hosted SigNoz, run the API via
+`pnpm --filter @tw-stock-dashboard/api start:otel` with:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://<popos-host>:4318
+OTEL_SERVICE_NAME=tw-stock-dashboard-api
+OTEL_DEPLOYMENT_ENV=development
+```
+
+Self-hosted SigNoz needs no ingestion key, so `OTEL_EXPORTER_OTLP_HEADERS` stays
+unset. Never hardcode a host into the repo.
+
 ## Version policy
 
 Latest LTS where an official LTS channel exists, otherwise latest stable. No pre-release

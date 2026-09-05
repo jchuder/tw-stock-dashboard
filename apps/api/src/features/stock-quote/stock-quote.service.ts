@@ -4,8 +4,9 @@ import { PinoLogger } from 'nestjs-pino';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import type { FugleConfigError, FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
-import type { QuoteProviderResult } from './quote-provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
+import type { QuoteProviderResult } from './quote-provider.js';
+import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 
@@ -36,6 +37,8 @@ export class StockQuoteService {
         // No TTL extension, no fetchedAt/asOf rewrite, no mutation — and no
         // fallback event: replaying history is not a new fallback.
         const cached = { ...hit, source: { ...hit.source, cacheHit: true } };
+        setSpanAttributes(servedSpanAttributes(cached.source.provider, cached.source.fallbackUsed, true));
+        addSpanEvent('market_data.quote_served', servedSpanAttributes(cached.source.provider, cached.source.fallbackUsed, true));
         this.logger.info({
           event: 'market_data_quote_served',
           operation: 'quote',
@@ -58,13 +61,21 @@ export class StockQuoteService {
             if (!isFugleFallbackEligible(error)) {
               return Effect.fail(error);
             }
+            const fallback = fallbackReason(error);
             this.logger.warn({
               event: 'market_data_fallback',
               operation: 'quote',
               symbol,
               from_provider: 'fugle',
               to_provider: 'twse-mis',
-              ...fallbackReason(error),
+              ...fallback,
+            });
+            addSpanEvent('market_data.fallback', {
+              'stock.symbol': symbol,
+              'market_data.from_provider': 'fugle',
+              'market_data.to_provider': 'twse-mis',
+              'market_data.reason': fallback.reason,
+              ...('upstream_status' in fallback ? { 'market_data.upstream_status': fallback.upstream_status } : {}),
             });
             return Effect.map(this.twseMisQuoteProvider.getQuote(symbol), (result) => ({
               ...result,
@@ -88,6 +99,8 @@ export class StockQuoteService {
         },
       };
       this.cache.set(symbol, response, fetchedAt);
+      setSpanAttributes(servedSpanAttributes(response.source.provider, response.source.fallbackUsed, false));
+      addSpanEvent('market_data.quote_served', servedSpanAttributes(response.source.provider, response.source.fallbackUsed, false));
       this.logger.info({
         event: 'market_data_quote_served',
         operation: 'quote',
@@ -135,4 +148,12 @@ function fallbackReason(error: Exclude<FugleQuoteError, FugleConfigError>): Fall
         ? { reason: 'http_429', upstream_status: error.status }
         : { reason: 'http_5xx', upstream_status: error.status };
   }
+}
+
+function servedSpanAttributes(provider: 'fugle' | 'twse-mis', fallbackUsed: boolean, cacheHit: boolean) {
+  return {
+    'market_data.provider': provider,
+    'market_data.fallback_used': fallbackUsed,
+    'market_data.cache_hit': cacheHit,
+  };
 }

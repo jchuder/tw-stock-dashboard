@@ -5,6 +5,7 @@ import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
+import { addSpanEvent } from '../../libs/observability/tracing.js';
 
 // Single Effect runtime boundary for this slice. Expected failures translate
 // to the frozen generic 500 after logging safe fields; unexpected defects are
@@ -20,7 +21,15 @@ export class StockQuoteController {
   async getQuote(@Param('symbol') symbol: string): Promise<StockQuoteResponse> {
     const result = await Effect.runPromise(Effect.either(this.stockQuoteService.getQuote(symbol)));
     if (Either.isLeft(result)) {
-      this.logger.error(failedLog(symbol, result.left));
+      const failure = failedLog(symbol, result.left);
+      this.logger.error(failure);
+      addSpanEvent('market_data.quote_failed', {
+        'market_data.provider': failure.provider,
+        'market_data.error_type': failure.error_type,
+        ...(failure.upstream_status !== undefined
+          ? { 'market_data.upstream_status': failure.upstream_status }
+          : {}),
+      });
       throw new InternalServerErrorException('Failed to fetch stock quote');
     }
     return result.right;
