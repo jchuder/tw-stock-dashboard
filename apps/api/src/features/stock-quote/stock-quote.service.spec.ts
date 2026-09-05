@@ -1,4 +1,5 @@
 import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
+import type { PinoLogger } from 'nestjs-pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
@@ -50,8 +51,17 @@ function expectRightQuote(result: QuoteResult, quote: Record<string, unknown>, s
   }
 }
 
+function silentLogger(): PinoLogger {
+  return { info: () => {}, warn: () => {}, error: () => {} } as unknown as PinoLogger;
+}
+
 function service() {
-  return new StockQuoteService(new FugleQuoteProvider(), new TwseMisQuoteProvider(), new StockQuoteCache());
+  return new StockQuoteService(
+    new FugleQuoteProvider(),
+    new TwseMisQuoteProvider(),
+    new StockQuoteCache(),
+    silentLogger(),
+  );
 }
 
 function callsTo(fetchMock: Mock, host: string): number {

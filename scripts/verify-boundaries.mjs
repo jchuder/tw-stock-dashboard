@@ -1,5 +1,5 @@
 // Boundary regression guard: proves eslint-plugin-boundaries actually blocks
-// the five forbidden directions (and allows feature -> shared).
+// the forbidden directions (and allows feature -> shared / feature -> lib).
 //
 // Why this exists: the dependency rule silently skips anything it cannot
 // classify (unknown elements, unresolvable .js ESM imports). A policy that
@@ -49,6 +49,18 @@ const FIXTURES = [
     content: `import { App } from '../../../../../apps/web/src/app/App.js';\nexport const e = App;\n`,
     expectViolation: true,
     label: 'api -> web source (blocked)',
+  },
+  {
+    file: 'apps/api/src/features/__bv-f__/f.ts',
+    content: `import { LOG_LEVEL } from '../../libs/observability/logger.config.js';\nexport const f = LOG_LEVEL;\n`,
+    expectViolation: false,
+    label: 'api-feature -> api-lib (allowed)',
+  },
+  {
+    file: 'apps/api/src/libs/__bv__/g.ts',
+    content: `import { StockQuoteModule } from '../../features/stock-quote/stock-quote.module.js';\nexport const g = StockQuoteModule;\n`,
+    expectViolation: true,
+    label: 'api-lib -> api-feature (blocked)',
   },
 ];
 

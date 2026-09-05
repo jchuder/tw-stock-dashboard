@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Mock } from 'vitest';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteModule } from './stock-quote.module.js';
+import { LoggerModule } from '../../libs/observability/logger.module.js';
 
 // Trimmed Fugle intraday quote fixture (official example values for 2330,
 // plus raw-only fields that must never leak into our contract).
@@ -87,7 +88,7 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [StockQuoteModule],
+      imports: [LoggerModule, StockQuoteModule],
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -317,5 +318,27 @@ it('reports Fugle asOf from lastUpdated microseconds', async () => {
       cacheHit: false,
       asOf: '2023-05-29T05:30:00.000Z',
     });
+  });
+it('echoes a valid incoming X-Request-ID on the response', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockFugle(200, FUGLE_FIXTURE);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/2330/quote')
+      .set('X-Request-ID', 'q6a-test-123')
+      .expect(200);
+
+    expect(res.headers['x-request-id']).toBe('q6a-test-123');
+  });
+
+  it('generates a response request ID when the incoming one is missing', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    mockFugle(200, FUGLE_FIXTURE);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expect(res.headers['x-request-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
   });
 });

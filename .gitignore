@@ -7,3 +7,5 @@ playwright/.cache/
 .env.local
 *.tsbuildinfo
 .DS_Store
+
+.idea/

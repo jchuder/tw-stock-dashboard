@@ -6,7 +6,7 @@ import boundaries from 'eslint-plugin-boundaries';
 import tseslint from 'typescript-eslint';
 
 const webLayers = ['web-app', 'web-widgets', 'web-feature', 'web-entity', 'web-core', 'web-shared'];
-const apiLayers = ['api-app', 'api-feature'];
+const apiLayers = ['api-app', 'api-feature', 'api-lib'];
 
 export default tseslint.config(
   {
@@ -27,6 +27,7 @@ export default tseslint.config(
         { type: 'web-core', pattern: 'apps/web/src/core' },
         { type: 'web-shared', pattern: 'apps/web/src/shared' },
         { type: 'api-feature', pattern: 'apps/api/src/features/*', capture: ['feature'] },
+        { type: 'api-lib', pattern: 'apps/api/src/libs/*', capture: ['lib'] },
         { type: 'api-app', pattern: 'apps/api/src' },
         { type: 'contracts', pattern: 'packages/contracts/src' },
       ],
@@ -85,7 +86,16 @@ export default tseslint.config(
             },
             {
               from: { element: { type: 'api-app' } },
-              allow: { to: { element: { type: 'api-feature' } } },
+              allow: { to: { element: { types: { anyOf: ['api-feature', 'api-lib'] } } } },
+            },
+            {
+              from: { element: { type: 'api-feature' } },
+              allow: { to: { element: { type: 'api-lib' } } },
+            },
+            {
+              from: { element: { type: 'api-lib' } },
+              disallow: { to: { element: { type: 'api-feature' } } },
+              message: 'api libs must not depend on features; invert the dependency',
             },
             {
               from: { element: { types: { anyOf: webLayers } } },

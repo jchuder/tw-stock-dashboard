@@ -27,6 +27,11 @@ Node.js 24.20.0 LTS, pnpm 11.25.0 (`packageManager` + `engines` enforce this).
 | `pnpm test`       | Build then run all workspace tests     |
 | `pnpm test:e2e`   | Build then run Playwright acceptance   |
 
+## Configuration
+
+API logging defaults to `LOG_LEVEL=info` (JSON lines on stdout). Set `LOG_LEVEL`
+to `debug`, `warn`, or `error` to change verbosity. No config framework involved.
+
 ## Version policy
 
 Latest LTS where an official LTS channel exists, otherwise latest stable. No pre-release
