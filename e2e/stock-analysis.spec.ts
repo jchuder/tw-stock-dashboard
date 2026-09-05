@@ -61,6 +61,7 @@ test('search loads chart and recent table', async ({ page }) => {
 
   await expect(page.getByText('2330 台積電')).toBeVisible();
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
+  await expect(page.getByText('TradingView Lightweight Charts™')).toBeVisible();
   await expect(page.getByText('開盤')).toBeVisible();
   await expect(page.getByText('2026-08-06')).toBeVisible();
   expect(historyRanges).toContain('1m');

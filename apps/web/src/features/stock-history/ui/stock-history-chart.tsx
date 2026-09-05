@@ -74,5 +74,14 @@ export function StockHistoryChart({ candles }: { candles: ReadonlyArray<Candle> 
     chart.timeScale().fitContent();
   }, [candles]);
 
-  return <div ref={containerRef} data-testid="stock-history-chart" style={{ height: 320 }} />;
+  return (
+    <div>
+      <div ref={containerRef} data-testid="stock-history-chart" style={{ height: 320 }} />
+      <p>
+        TradingView Lightweight Charts™
+        <br />
+        Copyright © 2025 TradingView, Inc.
+      </p>
+    </div>
+  );
 }
