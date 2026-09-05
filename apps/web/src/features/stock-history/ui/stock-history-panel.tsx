@@ -1,0 +1,68 @@
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import type { JSX } from 'react';
+import type { HistoryRange } from '@tw-stock-dashboard/contracts';
+import { fetchStockHistory } from '../api/stock-history.api.js';
+import { StockHistoryChart } from './stock-history-chart.js';
+
+const RANGES: ReadonlyArray<{ value: HistoryRange; label: string }> = [
+  { value: '1m', label: '1M' },
+  { value: '3m', label: '3M' },
+  { value: '6m', label: '6M' },
+];
+
+export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
+  const [range, setRange] = useState<HistoryRange>('1m');
+  const history = useQuery({
+    queryKey: ['stock-history', symbol, range],
+    queryFn: () => fetchStockHistory(symbol, range),
+    retry: false,
+  });
+
+  return (
+    <section>
+      <div>
+        {RANGES.map((option) => (
+          <button key={option.value} type="button" aria-pressed={range === option.value} onClick={() => setRange(option.value)}>
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {history.isPending && <p>歷史資料載入中…</p>}
+      {history.isError && <p>歷史資料載入失敗，請稍後再試</p>}
+      {history.isSuccess && history.data.candles.length === 0 && <p>暫無歷史交易資料</p>}
+      {history.isSuccess && history.data.candles.length > 0 && (
+        <div>
+          <StockHistoryChart candles={history.data.candles} />
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>開盤</th>
+                <th>最高</th>
+                <th>最低</th>
+                <th>收盤</th>
+                <th>成交量</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.data.candles
+                .slice(-5)
+                .reverse()
+                .map((candle) => (
+                  <tr key={candle.date}>
+                    <td>{candle.date}</td>
+                    <td>{candle.open}</td>
+                    <td>{candle.high}</td>
+                    <td>{candle.low}</td>
+                    <td>{candle.close}</td>
+                    <td>{candle.volume}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}

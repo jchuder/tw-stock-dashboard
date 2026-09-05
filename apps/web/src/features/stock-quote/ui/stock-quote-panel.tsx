@@ -16,7 +16,7 @@ function formatSigned(value: number, suffix = ''): string {
   return `${value >= 0 ? '+' : ''}${value}${suffix}`;
 }
 
-export function StockQuotePanel(): JSX.Element {
+export function StockQuotePanel({ onSymbolSubmitted }: { onSymbolSubmitted?: (symbol: string) => void }): JSX.Element {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState<string | null>(null);
   const previousProvider = useRef<'fugle' | 'twse-mis' | null>(null);
@@ -62,9 +62,10 @@ export function StockQuotePanel(): JSX.Element {
     // otherwise be unchanged and nothing would refetch.
     if (symbol === submitted) {
       void quote.refetch();
-      return;
+    } else {
+      setSubmitted(symbol);
     }
-    setSubmitted(symbol);
+    onSymbolSubmitted?.(symbol);
   };
 
   const source = quote.data?.source;

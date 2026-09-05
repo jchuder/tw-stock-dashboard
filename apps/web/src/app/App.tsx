@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { Toaster } from 'sonner';
-import { StockQuotePanel } from '../features/stock-quote/index.js';
+import { StockAnalysis } from '../widgets/stock-analysis/index.js';
 import { fetchHealth } from '../shared/api/health.js';
+
 export function App(): JSX.Element {
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, retry: false });
 
@@ -17,7 +18,7 @@ export function App(): JSX.Element {
     <main>
       <h1>Taiwan Stock Dashboard</h1>
       <p>{apiStatus}</p>
-      <StockQuotePanel />
+      <StockAnalysis />
       <Toaster closeButton />
     </main>
   );
