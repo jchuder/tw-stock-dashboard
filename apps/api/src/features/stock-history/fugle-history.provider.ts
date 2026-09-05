@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Clock, Duration, Effect, Schema } from 'effect';
-import type { HistoryRange, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
-import { StockHistoryResponseSchema } from '@tw-stock-dashboard/contracts';
+import { Duration, Effect, Schema } from 'effect';
 import type { FugleHistoryError } from './fugle-history.error.js';
 import {
   FugleHistoryConfigError,
@@ -11,30 +9,35 @@ import {
   FugleHistoryTimeoutError,
 } from './fugle-history.error.js';
 import { FugleHistorySchema } from './fugle-history.schema.js';
-import { historyWindow } from './history-window.js';
+import type { FugleHistoryResult } from './fugle-history.schema.js';
 
 const FUGLE_CANDLES_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/historical/candles';
 
 // Mirrors the stock-quote upstream budget (3s network fetch). Extract to a
+// shared home on the third concrete usage, not before.
 const UPSTREAM_TIMEOUT_MS = 3000;
 
+// No shared HTTP client: second concrete usage with no shared behavior yet.
+// A FugleClient waits for the third usage or a real shared need.
 @Injectable()
 export class FugleHistoryProvider {
-  getHistory(symbol: string, range: HistoryRange): Effect.Effect<StockHistoryResponse, FugleHistoryError> {
+  getHistory(
+    symbol: string,
+    from: string,
+    to: string,
+  ): Effect.Effect<FugleHistoryResult, FugleHistoryError> {
     return Effect.gen(function* () {
       const apiKey = process.env.FUGLE_API_KEY;
       if (!apiKey) {
         return yield* new FugleHistoryConfigError();
       }
 
-      const nowMs = yield* Clock.currentTimeMillis;
-      const window = historyWindow(range, nowMs);
       const query = new URLSearchParams({
         timeframe: 'D',
         fields: 'open,high,low,close,volume',
         sort: 'asc',
-        from: window.from,
-        to: window.to,
+        from,
+        to,
       });
       const response = yield* Effect.tryPromise({
         try: (signal) =>
@@ -60,25 +63,20 @@ export class FugleHistoryProvider {
       const history = yield* Schema.decodeUnknown(FugleHistorySchema)(raw).pipe(
         Effect.mapError(() => new FugleHistoryDecodeError()),
       );
-
-      // Ascending is requested upstream, but the contract guarantee must not
-      // depend on it: sort defensively (yyyy-MM-dd sorts lexicographically).
-      const candles = [...history.data]
-        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-        .map((candle) => ({
-          date: candle.date,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: candle.volume,
-        }));
-      return yield* Schema.decodeUnknown(StockHistoryResponseSchema)({
+      return {
         symbol: history.symbol,
         market: history.exchange === 'TWSE' ? 'TWSE' : 'TPEX',
-        range,
-        candles,
-      }).pipe(Effect.mapError(() => new FugleHistoryDecodeError()));
+        candles: [...history.data]
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .map((candle) => ({
+            date: candle.date,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            volume: candle.volume,
+          })),
+      };
     });
   }
 }

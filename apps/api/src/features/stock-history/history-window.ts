@@ -11,6 +11,11 @@ const RANGE_MONTHS: Record<HistoryRange, number> = {
   '6m': 6,
 };
 
+// MA60 needs up to 59 trading sessions before the first visible candle. Four
+// calendar months always cover that on TWSE/TPEx calendars; missing sessions
+// simply yield null MAs instead of guessed data.
+export const WARMUP_MONTHS = 4;
+
 // Pure calendar math. `to` is the Asia/Taipei calendar date of now — never the
 // UTC date, or a post-midnight Taipei request lands on yesterday. `from` goes
 // back whole calendar months with month-end clamp (Mar 31 - 1m -> Feb 28/29).
@@ -18,6 +23,13 @@ const RANGE_MONTHS: Record<HistoryRange, number> = {
 export function historyWindow(range: HistoryRange, nowMs: number): HistoryWindow {
   const to = taipeiParts(nowMs);
   return { from: shiftMonth(to, -RANGE_MONTHS[range]), to: formatDate(to) };
+}
+
+// String form of the same shift, for deriving the provider window from a
+// visible `from` date. Never exposed as a public query parameter.
+export function shiftCalendarMonths(date: string, deltaMonths: number): string {
+  const [year, month, day] = date.split('-').map((part) => Number(part));
+  return shiftMonth({ year, month, day }, deltaMonths);
 }
 
 interface YearMonthDay {

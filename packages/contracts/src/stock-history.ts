@@ -11,6 +11,10 @@ export const CandleSchema = Schema.Struct({
   low: Schema.Number,
   close: Schema.Number,
   volume: Schema.Number,
+  ma5: Schema.NullOr(Schema.Number),
+  ma10: Schema.NullOr(Schema.Number),
+  ma20: Schema.NullOr(Schema.Number),
+  ma60: Schema.NullOr(Schema.Number),
 });
 export type Candle = Schema.Schema.Type<typeof CandleSchema>;
 

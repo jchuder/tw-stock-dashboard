@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { historyWindow } from './history-window.js';
+import { historyWindow, shiftCalendarMonths, WARMUP_MONTHS } from './history-window.js';
 
 describe('historyWindow', () => {
   it('computes a 1m window ending on the Taipei calendar date', () => {
@@ -35,5 +35,14 @@ describe('historyWindow', () => {
     const nowMs = Date.UTC(2026, 8, 5, 16, 30, 0);
 
     expect(historyWindow('1m', nowMs)).toEqual({ from: '2026-08-06', to: '2026-09-06' });
+  });
+
+  it('shifts calendar months backwards and clamps properly', () => {
+    // 4 months back from 2026-08-06 is 2026-04-06
+    expect(shiftCalendarMonths('2026-08-06', -WARMUP_MONTHS)).toBe('2026-04-06');
+    // 4 months back across year boundary: 2026-02-15 -> 2025-10-15
+    expect(shiftCalendarMonths('2026-02-15', -4)).toBe('2025-10-15');
+    // Month-end clamp: May 31 minus 1 month is April 30
+    expect(shiftCalendarMonths('2026-05-31', -1)).toBe('2026-04-30');
   });
 });

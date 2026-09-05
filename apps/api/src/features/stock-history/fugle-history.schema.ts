@@ -1,4 +1,6 @@
 import { Schema } from 'effect';
+import type { Market } from '@tw-stock-dashboard/contracts';
+import type { BaseCandle } from './moving-average.js';
 
 // Feature-local Fugle historical-candles shape
 // (https://developer.fugle.tw/docs/data/http-api/historical/candles).
@@ -19,3 +21,11 @@ export const FugleHistorySchema = Schema.Struct({
   ),
 });
 export type FugleHistory = Schema.Schema.Type<typeof FugleHistorySchema>;
+
+// Provider result: normalized candles plus listing market. The visible range,
+// MA calculation, and response assembly belong to the service, not the fetch.
+export interface FugleHistoryResult {
+  symbol: string;
+  market: Market;
+  candles: BaseCandle[];
+}

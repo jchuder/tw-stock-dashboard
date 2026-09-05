@@ -14,7 +14,6 @@ const VALID_UPSTREAM = {
 const EXPECTED_RESPONSE = {
   symbol: '2330',
   market: 'TWSE',
-  range: '1m',
   candles: [
     { date: '2026-08-05', open: 2300, high: 2320, low: 2280, close: 2310, volume: 28765432 },
     { date: '2026-08-06', open: 2310, high: 2330, low: 2300, close: 2320, volume: 30123456 },
@@ -25,8 +24,8 @@ function okOnce(body: unknown, status = 200): void {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })));
 }
 
-function run(symbol = '2330', range: '1m' | '3m' | '6m' = '1m') {
-  return Effect.runPromise(Effect.either(new FugleHistoryProvider().getHistory(symbol, range)));
+function run(symbol = '2330', from = '2026-08-05', to = '2026-08-06') {
+  return Effect.runPromise(Effect.either(new FugleHistoryProvider().getHistory(symbol, from, to)));
 }
 
 describe('FugleHistoryProvider typed failures', () => {
@@ -109,7 +108,9 @@ describe('FugleHistoryProvider typed failures', () => {
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* Effect.fork(Effect.either(new FugleHistoryProvider().getHistory('2330', '1m')));
+        const fiber = yield* Effect.fork(
+          Effect.either(new FugleHistoryProvider().getHistory('2330', '2026-08-05', '2026-08-06')),
+        );
         yield* TestClock.adjust('3 seconds');
         return yield* Fiber.join(fiber);
       }).pipe(Effect.provide(TestContext.TestContext)),

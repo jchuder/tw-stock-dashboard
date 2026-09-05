@@ -4,6 +4,7 @@ import type { JSX } from 'react';
 import type { HistoryRange } from '@tw-stock-dashboard/contracts';
 import { fetchStockHistory } from '../api/stock-history.api.js';
 import { StockHistoryChart } from './stock-history-chart.js';
+import type { MaVisibility } from './stock-history-chart.js';
 
 const RANGES: ReadonlyArray<{ value: HistoryRange; label: string }> = [
   { value: '1m', label: '1M' },
@@ -11,13 +12,26 @@ const RANGES: ReadonlyArray<{ value: HistoryRange; label: string }> = [
   { value: '6m', label: '6M' },
 ];
 
+const MA_KEYS: ReadonlyArray<keyof MaVisibility> = ['ma5', 'ma10', 'ma20', 'ma60'];
+
 export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
   const [range, setRange] = useState<HistoryRange>('1m');
+  const [maVisibility, setMaVisibility] = useState<MaVisibility>({
+    ma5: true,
+    ma10: true,
+    ma20: true,
+    ma60: true,
+  });
+
   const history = useQuery({
     queryKey: ['stock-history', symbol, range],
     queryFn: () => fetchStockHistory(symbol, range),
     retry: false,
   });
+
+  const toggleMa = (key: keyof MaVisibility) => {
+    setMaVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   return (
     <section>
@@ -28,12 +42,19 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
           </button>
         ))}
       </div>
+      <div>
+        {MA_KEYS.map((key) => (
+          <button key={key} type="button" aria-pressed={maVisibility[key]} onClick={() => toggleMa(key)}>
+            {key.toUpperCase()}
+          </button>
+        ))}
+      </div>
       {history.isPending && <p>歷史資料載入中…</p>}
       {history.isError && <p>歷史資料載入失敗，請稍後再試</p>}
       {history.isSuccess && history.data.candles.length === 0 && <p>暫無歷史交易資料</p>}
       {history.isSuccess && history.data.candles.length > 0 && (
         <div>
-          <StockHistoryChart candles={history.data.candles} />
+          <StockHistoryChart candles={history.data.candles} maVisibility={maVisibility} />
           <table>
             <thead>
               <tr>

@@ -24,8 +24,8 @@ function historyBody(range: string, price: number) {
     market: 'TWSE',
     range,
     candles: [
-      { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, volume: 1000 },
-      { date: '2026-08-06', open: 555, high: 566, low: 545, close: price, volume: 2000 },
+      { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, volume: 1000, ma5: null, ma10: null, ma20: null, ma60: null },
+      { date: '2026-08-06', open: 555, high: 566, low: 545, close: price, volume: 2000, ma5: 555, ma10: null, ma20: null, ma60: null },
     ],
   };
 }
@@ -52,7 +52,7 @@ async function setupAnalysis(page: Page) {
   return historyRanges;
 }
 
-test('search loads chart and recent table', async ({ page }) => {
+test('search loads chart, MA toggles, and recent table', async ({ page }) => {
   const historyRanges = await setupAnalysis(page);
 
   await page.goto('/');
@@ -62,9 +62,54 @@ test('search loads chart and recent table', async ({ page }) => {
   await expect(page.getByText('2330 台積電')).toBeVisible();
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
   await expect(page.getByText('TradingView Lightweight Charts™')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'MA5' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'MA5' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'MA10' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'MA10' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'MA20' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'MA60' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'MA60' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('開盤')).toBeVisible();
   await expect(page.getByText('2026-08-06')).toBeVisible();
   expect(historyRanges).toContain('1m');
+});
+
+test('MA toggles switch aria-pressed without refetching and persist across range switch', async ({ page }) => {
+  const historyRanges = await setupAnalysis(page);
+
+  await page.goto('/');
+  await page.getByPlaceholder('2330').fill('2330');
+  await page.getByRole('button', { name: '查詢' }).click();
+  await expect(page.getByTestId('stock-history-chart')).toBeVisible();
+
+  const initialRequests = historyRanges.length;
+
+  // Toggle MA20 off
+  await page.getByRole('button', { name: 'MA20' }).click();
+  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'false');
+  expect(historyRanges.length).toBe(initialRequests);
+
+  // Toggle MA20 back on
+  await page.getByRole('button', { name: 'MA20' }).click();
+  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'true');
+  expect(historyRanges.length).toBe(initialRequests);
+
+  // Toggle MA20 off again
+  await page.getByRole('button', { name: 'MA20' }).click();
+  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'false');
+
+  // Switch to 3M range
+  await page.getByRole('button', { name: '3M' }).click();
+  await expect(page.getByRole('button', { name: '3M' })).toHaveAttribute('aria-pressed', 'true');
+  expect(historyRanges.length).toBe(initialRequests + 1);
+  expect(historyRanges[historyRanges.length - 1]).toBe('3m');
+
+  // MA20 must preserve its toggled-off state
+  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'MA5' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'MA10' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'MA60' })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('range buttons refetch with 3m and 6m', async ({ page }) => {
