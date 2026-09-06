@@ -6,8 +6,8 @@ export {
   StockQuoteSourceSchema,
 } from './stock-quote.js';
 export type { Market, StockQuote, StockQuoteResponse, StockQuoteSource } from './stock-quote.js';
-export { CandleSchema, HistoryRangeSchema, StockHistoryResponseSchema, TimeframeSchema } from './stock-history.js';
-export type { Candle, HistoryRange, StockHistoryResponse, Timeframe } from './stock-history.js';
+export { CandleSchema, HistoryRangeSchema, StockHistoryResponseSchema, TimeframeSchema, VolumeUnitSchema } from './stock-history.js';
+export type { Candle, HistoryRange, StockHistoryResponse, Timeframe, VolumeUnit } from './stock-history.js';
 export {
   InstitutionalFlowSnapshotSchema,
   MarketIndexSnapshotSchema,

@@ -21,6 +21,10 @@ export const StockQuoteSchema = Schema.Struct({
   highPrice: Schema.NullOr(Schema.Number),
   lowPrice: Schema.NullOr(Schema.Number),
   tradeVolume: Schema.NullOr(Schema.Number),
+  // Both providers natively report the session volume in lots (張),
+  // verified live (2330, 2026-09-04: Fugle total 13169 = MIS v 13169,
+  // daily 14102018 shares). No conversion, no ambiguity.
+  tradeVolumeUnit: Schema.Literal('lot'),
   limitUpPrice: Schema.NullOr(Schema.Number),
   limitDownPrice: Schema.NullOr(Schema.Number),
 });
