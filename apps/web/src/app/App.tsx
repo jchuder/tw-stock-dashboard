@@ -31,7 +31,10 @@ export function App(): JSX.Element {
 
   // Re-submitting the same symbol must still refresh: the seq busts the
   // quote query key so TanStack refetches instead of serving cache.
+  // We clear provenance immediately so stale metadata is never shown for an
+  // in-flight or failed refresh.
   const onSearch = (symbol: string): void => {
+    setProvenance(null);
     setSearch((prev) => ({ symbol, seq: (prev?.seq ?? 0) + 1 }));
   };
 

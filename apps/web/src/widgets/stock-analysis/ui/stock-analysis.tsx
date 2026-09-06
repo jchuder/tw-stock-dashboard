@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { HistoryRange } from '@tw-stock-dashboard/contracts';
 import { StockHistoryFocus, StockHistoryTable } from '../../../features/stock-history/index.js';
@@ -46,13 +46,20 @@ export function StockAnalysis({
     }
   }, [requestedSymbol, validatedStock?.symbol, onProvenance]);
 
-  const handleQuoteResolved = (
-    stock: { symbol: string; name: string },
-    info: { provider: 'fugle' | 'twse-mis'; asOf: string | null },
-  ): void => {
-    setValidatedStock(stock);
-    onProvenance?.(info);
-  };
+  const handleQuoteResolved = useCallback(
+    (
+      stock: { symbol: string; name: string },
+      info: { provider: 'fugle' | 'twse-mis'; asOf: string | null },
+    ): void => {
+      setValidatedStock((current) =>
+        current?.symbol === stock.symbol && current.name === stock.name
+          ? current
+          : stock,
+      );
+      onProvenance?.(info);
+    },
+    [onProvenance],
+  );
 
   const onSelectWatchlistStock = (symbol: string): void => {
     if (symbol === requestedSymbol && validatedStock !== null) {

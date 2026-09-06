@@ -68,6 +68,7 @@ test('stock quote happy path', async ({ page }) => {
   await expect(page.getByTestId('stock-quote-market')).toHaveText('上市');
   await expect(page.getByTestId('stock-quote-price')).toHaveText('568');
   await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 2 (+0.35%)');
+  await expect(page.getByRole('group', { name: '目前股價 568，較前一交易日上漲 2，漲跌幅 0.35%' })).toBeVisible();
   await expect(page.getByText('昨收 566')).toBeVisible();
   await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
   await expect(page.getByText('最後更新：2026/09/04 13:30:00')).toBeVisible();
@@ -92,6 +93,7 @@ test('falling quote states explicit previous-day wording in green', async ({ pag
   await page.getByRole('button', { name: '搜尋' }).click();
 
   await expect(page.getByTestId('stock-quote-change')).toHaveText('▼ 6 (-1.06%)');
+  await expect(page.getByRole('group', { name: '目前股價 560，較前一交易日下跌 6，漲跌幅 -1.06%' })).toBeVisible();
 });
 
 test('flat quote states 持平 wording', async ({ page }) => {
@@ -109,6 +111,7 @@ test('flat quote states 持平 wording', async ({ page }) => {
   await page.getByRole('button', { name: '搜尋' }).click();
 
   await expect(page.getByTestId('stock-quote-change')).toHaveText('0 (0.00%)');
+  await expect(page.getByRole('group', { name: '目前股價 566，較前一交易日持平 0，漲跌幅 0%' })).toBeVisible();
 });
 
 test('source fallback and recovery toasts', async ({ page }) => {
@@ -149,4 +152,59 @@ test('source fallback and recovery toasts', async ({ page }) => {
   await search.click();
   await expect(page.getByText(RECOVERY_TOAST)).toHaveCount(1);
   await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+});
+
+test('same-symbol refresh clears header provenance until new quote resolves', async ({ page }) => {
+  let releaseSecondQuote: (() => void) | null = null;
+  const secondQuotePromise = new Promise<void>((resolve) => {
+    releaseSecondQuote = resolve;
+  });
+  let callCount = 0;
+
+  await page.route('**/api/v1/stocks/2330/quote', async (route) => {
+    callCount += 1;
+    if (callCount === 1) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(FUGLE_BODY),
+      });
+    }
+    await secondQuotePromise;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...MIS_BODY,
+        source: {
+          provider: 'twse-mis',
+          fallbackUsed: true,
+          fetchedAt: '2026-09-06T04:00:00.000Z',
+          asOf: '2026-09-04T05:35:00.000Z',
+          cacheHit: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  // Response 1 (boot autofocus query): header displays initial source and update time
+  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('最後更新：2026/09/04 13:30:00')).toBeVisible();
+
+  // Trigger same-symbol refresh
+  await page.getByPlaceholder('請輸入股票代號').fill('2330');
+  await page.getByRole('button', { name: '搜尋' }).click();
+
+  // In-flight refresh must clear header provenance to '—'
+  await expect(page.getByText('資料來源：—')).toBeVisible();
+  await expect(page.getByText('最後更新：—')).toBeVisible();
+
+  // Resolve second response
+  releaseSecondQuote!();
+
+  // Header updates with the new response source and timestamp
+  await expect(page.getByText('資料來源：TWSE MIS').first()).toBeVisible();
+  await expect(page.getByText('最後更新：2026/09/04 13:35:00')).toBeVisible();
 });

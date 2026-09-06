@@ -141,7 +141,7 @@ export function StockQuotePanel({
           </div>
           <div
             role="group"
-            aria-label={`目前股價 ${quote.data.price}，較前一交易日${quote.data.change > 0 ? '上漲' : quote.data.change < 0 ? '下跌' : '持平'} ${Math.abs(quote.data.change)}，漲幅 ${quote.data.changePercent}%`}
+            aria-label={`目前股價 ${quote.data.price}，較前一交易日${quote.data.change > 0 ? '上漲' : quote.data.change < 0 ? '下跌' : '持平'} ${Math.abs(quote.data.change)}，漲跌幅 ${quote.data.changePercent}%`}
             style={{
               display: 'flex',
               alignItems: 'baseline',
