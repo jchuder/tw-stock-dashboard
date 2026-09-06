@@ -5,6 +5,9 @@ export type Market = Schema.Schema.Type<typeof MarketSchema>;
 
 // Pure market-data payload. No provenance here — source metadata joins at the
 // response level so providers stay focused on normalized quotes.
+// Intraday session fields (tradeDate/open/high/low/volume/limits) are
+// nullable: pre-market they may not exist yet, and a missing optional field
+// must never fail the whole quote decode.
 export const StockQuoteSchema = Schema.Struct({
   symbol: Schema.String,
   name: Schema.String,
@@ -13,6 +16,13 @@ export const StockQuoteSchema = Schema.Struct({
   previousClose: Schema.Number,
   change: Schema.Number,
   changePercent: Schema.Number,
+  tradeDate: Schema.NullOr(Schema.String),
+  openPrice: Schema.NullOr(Schema.Number),
+  highPrice: Schema.NullOr(Schema.Number),
+  lowPrice: Schema.NullOr(Schema.Number),
+  tradeVolume: Schema.NullOr(Schema.Number),
+  limitUpPrice: Schema.NullOr(Schema.Number),
+  limitDownPrice: Schema.NullOr(Schema.Number),
 });
 export type StockQuote = Schema.Schema.Type<typeof StockQuoteSchema>;
 
