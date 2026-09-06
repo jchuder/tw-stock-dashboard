@@ -84,9 +84,11 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
 // endpoints describe the same symbol, so a proof of non-existence (404 from
 // either side) always wins over a transient sibling: falling back to MIS on
 // a 429 while the quote says 404 would serve a stale quote for a delisted
-// symbol. Auth/config failures (never fallback-eligible) win over transient
-// ones for the same reason. Ties resolve to the quote side. Pure — unit
-// tested directly and through the provider mixed-status tests.
+// symbol. Every other non-fallbackable error (config, 401/403, and the rest
+// of 4xx except 429) likewise wins over transient ones, mirroring the
+// service fallback policy so the two never drift apart. Ties resolve to the
+// quote side. Pure — unit tested directly and through the provider
+// mixed-status tests.
 export function selectPrimaryError(quoteError: FugleQuoteError, tickerError: FugleQuoteError): FugleQuoteError {
   const quoteRank = errorRank(quoteError);
   const tickerRank = errorRank(tickerError);
@@ -113,7 +115,6 @@ function selectPrimaryOutcome(
     ),
   );
 }
-
 function errorRank(error: FugleQuoteError): number {
   if (error._tag === 'FugleHttpError' && error.status === 404) {
     return 0;
@@ -121,7 +122,14 @@ function errorRank(error: FugleQuoteError): number {
   if (error._tag === 'FugleConfigError') {
     return 1;
   }
-  if (error._tag === 'FugleHttpError' && (error.status === 401 || error.status === 403)) {
+  // Every other non-fallbackable error (401/403 and the rest of 4xx except
+  // 429) outranks transient ones, mirroring the service fallback policy so
+  // the two can never drift apart again: only 429 and 5xx fall back.
+  if (
+    error._tag === 'FugleHttpError' &&
+    error.status !== 429 &&
+    !(error.status >= 500 && error.status <= 599)
+  ) {
     return 1;
   }
   return 2;

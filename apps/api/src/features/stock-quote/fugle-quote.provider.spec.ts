@@ -388,6 +388,21 @@ describe('FugleQuoteProvider typed failures', () => {
       }
     }
   });
+
+  it('prefers ticker 400 over quote 503', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    statusPair(503, 400, { message: 'downstream' }, { message: 'bad request' });
+
+    const result = await run();
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleHttpError');
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(400);
+      }
+    }
+  });
 });
 
 describe('selectPrimaryError precedence', () => {
@@ -402,4 +417,14 @@ describe('selectPrimaryError precedence', () => {
     expect(selectPrimaryError(rateLimited, forbidden)).toBe(forbidden);
     expect(selectPrimaryError(new FugleNetworkError(), new FugleTimeoutError())._tag).toBe('FugleNetworkError');
   });
+
+  it('ranks every non-429 4xx above 5xx so the rank mirrors the fallback policy', () => {
+    const badRequest = new FugleHttpError({ status: 400 });
+    const unprocessable = new FugleHttpError({ status: 422 });
+    const unavailable = new FugleHttpError({ status: 503 });
+
+    expect(selectPrimaryError(unavailable, badRequest)).toBe(badRequest);
+    expect(selectPrimaryError(unprocessable, unavailable)).toBe(unprocessable);
+  });
+
 });

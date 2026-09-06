@@ -367,6 +367,31 @@ describe('StockQuoteService ticker fallback policy', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
+  it('surfaces quote 422 over ticker 503 with no MIS fallback', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('/intraday/quote/')) {
+        return new Response(JSON.stringify({ message: 'unprocessable' }), { status: 422 });
+      }
+      if (String(input).includes('api.fugle.tw')) {
+        return new Response(JSON.stringify({ message: 'downstream' }), { status: 503 });
+      }
+      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('2330')));
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleHttpError');
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(422);
+      }
+    }
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+
   it('fails with StockNotFoundError on Fugle 404 without calling MIS provider', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     const fetchMock = vi.fn(async (input: unknown) => {
