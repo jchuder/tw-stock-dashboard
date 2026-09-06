@@ -126,6 +126,16 @@ async function main() {
     await page.locator('text=2330 台積電').waitFor({ timeout: 15000 });
     await page.locator('[data-testid="stock-history-chart"]').waitFor({ timeout: 15000 });
 
+    // Default range is 當日 (1d): at least one history request carries
+    // range=1d, and the chart labels the 5-minute timeframe.
+    const defaultRangeHit = apiRequests.history.some(
+      (url) => new URL(url).searchParams.get('range') === '1d',
+    );
+    if (!defaultRangeHit) {
+      throw new Error('No default 1d history request detected');
+    }
+    await page.locator('text=5 分鐘 K').waitFor({ timeout: 15000 });
+
     if (apiRequests.quote.length === 0) {
       throw new Error('No network request detected for stock quote');
     }

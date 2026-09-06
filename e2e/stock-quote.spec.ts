@@ -8,6 +8,7 @@ const ENRICHED_QUOTE = {
   tradeVolume: 12345678,
   limitUpPrice: 622,
   limitDownPrice: 510,
+  tradeVolumeUnit: 'lot',
 };
 
 const FUGLE_BODY = {

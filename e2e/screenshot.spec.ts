@@ -28,6 +28,7 @@ const QUOTE_2330 = {
   tradeVolume: 38500000,
   limitUpPrice: 2629,
   limitDownPrice: 2151,
+  tradeVolumeUnit: 'lot',
   source: {
     provider: 'fugle',
     fallbackUsed: false,
@@ -43,6 +44,7 @@ const CANDLES_2330 = {
   market: 'TWSE',
   range: '1m',
   timeframe: '1d',
+  volumeUnit: 'share',
   candles: [
     { date: '2026-08-05', open: 2280, high: 2310, low: 2270, close: 2300, volume: 24500000, ma5: null, ma10: null, ma20: null, ma60: null },
     { date: '2026-08-06', open: 2305, high: 2325, low: 2295, close: 2315, volume: 26800000, ma5: null, ma10: null, ma20: null, ma60: null },
@@ -96,7 +98,7 @@ test('capture dashboard screenshot for documentation', async ({ page }) => {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ ...CANDLES_2330, range, timeframe: intraday ? '5m' : '1d' }),
+      body: JSON.stringify({ ...CANDLES_2330, range, timeframe: intraday ? '5m' : '1d', volumeUnit: intraday ? 'lot' : 'share' }),
     });
   });
 

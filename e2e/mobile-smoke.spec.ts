@@ -28,6 +28,7 @@ const QUOTE_2330 = {
   tradeVolume: 22334455,
   limitUpPrice: 2629,
   limitDownPrice: 2151,
+  tradeVolumeUnit: 'lot',
   source: {
     provider: 'fugle',
     fallbackUsed: false,
@@ -42,9 +43,10 @@ const CANDLES_2330 = {
   market: 'TWSE',
   range: '1d',
   timeframe: '5m',
+  volumeUnit: 'lot',
   candles: [
-    { date: '2026-08-05', open: 2300, high: 2320, low: 2280, close: 2310, volume: 28765432, ma5: null, ma10: null, ma20: null, ma60: null },
-    { date: '2026-08-06', open: 2310, high: 2330, low: 2300, close: 2320, volume: 30123456, ma5: 2315, ma10: null, ma20: null, ma60: null },
+    { date: '2026-09-04T09:00:00.000+08:00', open: 2300, high: 2320, low: 2280, close: 2310, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
+    { date: '2026-09-04T09:05:00.000+08:00', open: 2310, high: 2330, low: 2300, close: 2320, volume: 900, ma5: 2315, ma10: null, ma20: null, ma60: null },
   ],
 };
 

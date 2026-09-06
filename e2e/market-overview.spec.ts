@@ -38,6 +38,7 @@ const QUOTE_BODY = {
   tradeVolume: 12345678,
   limitUpPrice: 622,
   limitDownPrice: 510,
+  tradeVolumeUnit: 'lot',
   source: {
     provider: 'fugle',
     fallbackUsed: false,
