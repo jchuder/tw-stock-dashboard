@@ -17,7 +17,7 @@ export class StockHistoryController {
   ): Promise<StockHistoryResponse> {
     const parsedRange = Schema.decodeUnknownEither(HistoryRangeSchema)(rangeParam ?? '1m');
     if (parsedRange._tag === 'Left') {
-      throw new BadRequestException('Invalid range: expected 1m, 3m, or 6m');
+      throw new BadRequestException('Invalid range: expected 1d, 3d, 5d, 1m, 3m, 6m, or 1y');
     }
     const range: HistoryRange = parsedRange.right;
     const result = await Effect.runPromise(Effect.either(this.stockHistoryService.getHistory(symbol, range)));
