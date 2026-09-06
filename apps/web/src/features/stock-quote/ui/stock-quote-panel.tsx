@@ -152,7 +152,7 @@ export function StockQuotePanel({
             <QuoteCell label="最高" value={formatNullable(quote.data.highPrice)} />
             <QuoteCell label="最低" value={formatNullable(quote.data.lowPrice)} />
             <QuoteCell
-              label="成交量"
+              label="成交量（張）"
               value={quote.data.tradeVolume === null ? '—' : quote.data.tradeVolume.toLocaleString()}
             />
             <QuoteCell label="漲停價" value={formatNullable(quote.data.limitUpPrice)} />

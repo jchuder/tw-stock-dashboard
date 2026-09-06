@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { CandlestickSeries, HistogramSeries, LineSeries, createChart } from 'lightweight-charts';
-import type { ISeriesApi, Time } from 'lightweight-charts';
-import type { Candle } from '@tw-stock-dashboard/contracts';
+import type { ISeriesApi } from 'lightweight-charts';
+import type { Candle, Timeframe } from '@tw-stock-dashboard/contracts';
+import { isIntradayAxis, toChartTime } from './chart-time.js';
 
 // Taiwan market convention: up is red, down is green. Kept as plain
 // component constants — no theme system until a second theme exists.
@@ -33,9 +34,11 @@ const DEFAULT_MA_VISIBILITY: MaVisibility = {
 
 export function StockHistoryChart({
   candles,
+  timeframe,
   maVisibility = DEFAULT_MA_VISIBILITY,
 }: {
   candles: ReadonlyArray<Candle>;
+  timeframe: Timeframe;
   maVisibility?: MaVisibility;
 }): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -52,7 +55,10 @@ export function StockHistoryChart({
     if (!container) {
       return;
     }
-    const chart = createChart(container, { autoSize: true });
+    const chart = createChart(container, {
+      autoSize: true,
+      timeScale: { timeVisible: true, secondsVisible: false },
+    });
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: UP_COLOR,
       downColor: DOWN_COLOR,
@@ -126,7 +132,7 @@ export function StockHistoryChart({
     }
     candleSeries.setData(
       candles.map((candle) => ({
-        time: toChartTime(candle.date),
+        time: toChartTime(candle.date, timeframe),
         open: candle.open,
         high: candle.high,
         low: candle.low,
@@ -135,7 +141,7 @@ export function StockHistoryChart({
     );
     volumeSeries.setData(
       candles.map((candle) => ({
-        time: toChartTime(candle.date),
+        time: toChartTime(candle.date, timeframe),
         value: candle.volume,
         color: candle.close >= candle.open ? UP_VOLUME_COLOR : DOWN_VOLUME_COLOR,
       })),
@@ -143,25 +149,29 @@ export function StockHistoryChart({
     ma5Series.setData(
       candles
         .filter((c): c is typeof c & { ma5: number } => c.ma5 !== null)
-        .map((c) => ({ time: toChartTime(c.date), value: c.ma5 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma5 })),
     );
     ma10Series.setData(
       candles
         .filter((c): c is typeof c & { ma10: number } => c.ma10 !== null)
-        .map((c) => ({ time: toChartTime(c.date), value: c.ma10 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma10 })),
     );
     ma20Series.setData(
       candles
         .filter((c): c is typeof c & { ma20: number } => c.ma20 !== null)
-        .map((c) => ({ time: toChartTime(c.date), value: c.ma20 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma20 })),
     );
     ma60Series.setData(
       candles
         .filter((c): c is typeof c & { ma60: number } => c.ma60 !== null)
-        .map((c) => ({ time: toChartTime(c.date), value: c.ma60 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma60 })),
     );
     chart.timeScale().fitContent();
-  }, [candles]);
+  }, [candles, timeframe]);
+
+  useEffect(() => {
+    chartRef.current?.timeScale().applyOptions({ timeVisible: isIntradayAxis(timeframe) });
+  }, [timeframe]);
 
   useEffect(() => {
     ma5SeriesRef.current?.applyOptions({ visible: maVisibility.ma5 });
@@ -180,12 +190,4 @@ export function StockHistoryChart({
       </p>
     </div>
   );
-}
-// Daily candles use `yyyy-MM-dd` business-day strings; 5m candles are ISO
-// instants that lightweight-charts needs as UTCTimestamps (seconds).
-function toChartTime(date: string): Time {
-  if (!date.includes('T')) {
-    return date as Time;
-  }
-  return Math.floor(new Date(date).getTime() / 1000) as Time;
 }

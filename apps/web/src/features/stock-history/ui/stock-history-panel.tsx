@@ -28,6 +28,11 @@ const TIMEFRAME_LABELS: Record<Timeframe, string> = {
   '1d': '日 K',
 };
 
+const VOLUME_UNIT_LABELS = {
+  lot: '成交量（張）',
+  share: '成交量（股）',
+} as const;
+
 function isIntradayRange(range: HistoryRange): boolean {
   return range === '1d' || range === '3d' || range === '5d';
 }
@@ -128,9 +133,9 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
         <>
           <div className="chart-card">
             <p style={{ margin: '0 0 8px 0', fontSize: '0.8rem', color: '#64748b' }}>
-              {TIMEFRAME_LABELS[history.data.timeframe]}
+              {TIMEFRAME_LABELS[history.data.timeframe]} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
             </p>
-            <StockHistoryChart candles={history.data.candles} maVisibility={maVisibility} />
+            <StockHistoryChart candles={history.data.candles} timeframe={history.data.timeframe} maVisibility={maVisibility} />
           </div>
 
           <div className="table-card">
@@ -146,7 +151,7 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
                     <th>收盤</th>
                     <th>最高</th>
                     <th>最低</th>
-                    <th>成交量</th>
+                    <th>成交量（股）</th>
                   </tr>
                 </thead>
                 <tbody>
