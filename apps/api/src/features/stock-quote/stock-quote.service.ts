@@ -10,6 +10,8 @@ import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracin
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 
+import { StockNotFoundError } from './stock-not-found.error.js';
+
 // Application seam: TTL cache in front of the Fugle primary / TWSE MIS
 // fallback workflow, and the single place that assembles source metadata.
 // Only normalized successes are cached — failures skip the write and the next
@@ -28,7 +30,7 @@ export class StockQuoteService {
     @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {}
 
-  getQuote(symbol: string): Effect.Effect<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError> {
+  getQuote(symbol: string): Effect.Effect<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError | StockNotFoundError> {
     return Effect.gen(this, function* () {
       const lookupTime = yield* Clock.currentTimeMillis;
       const hit = this.cache.get(symbol, lookupTime);
@@ -56,8 +58,11 @@ export class StockQuoteService {
             error,
           ): Effect.Effect<
             QuoteProviderResult & { readonly provider: 'twse-mis'; readonly fallbackUsed: true },
-            FugleQuoteError | TwseMisQuoteError
+            FugleQuoteError | TwseMisQuoteError | StockNotFoundError
           > => {
+            if (error._tag === 'FugleHttpError' && error.status === 404) {
+              return Effect.fail(new StockNotFoundError());
+            }
             if (!isFugleFallbackEligible(error)) {
               return Effect.fail(error);
             }

@@ -5,6 +5,7 @@ import type { Mock } from 'vitest';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import type { StockNotFoundError } from './stock-not-found.error.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
@@ -32,7 +33,7 @@ const EXPECTED_QUOTE = {
   changePercent: 0.35,
 };
 
-type QuoteResult = Either.Either<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError>;
+type QuoteResult = Either.Either<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError | StockNotFoundError>;
 
 interface ExpectedSource {
   provider: 'fugle' | 'twse-mis';
@@ -292,3 +293,31 @@ describe('StockQuoteService TTL cache', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
 });
+
+describe('StockQuoteService invalid symbol handling', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('fails with StockNotFoundError on Fugle 404 without calling MIS provider', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('api.fugle.tw')) {
+        return new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 });
+      }
+      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('999999')));
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('StockNotFoundError');
+    }
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+});
+

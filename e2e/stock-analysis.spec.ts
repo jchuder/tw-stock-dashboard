@@ -148,3 +148,94 @@ test('history failure does not take down the quote', async ({ page }) => {
   await expect(page.getByText('2330 台積電')).toBeVisible();
   await expect(page.getByText('歷史資料載入失敗，請稍後再試')).toBeVisible();
 });
+
+test('invalid symbol displays 查無此股票代號 without requesting history and without chart', async ({ page }) => {
+  const historyCalls: string[] = [];
+  await page.route('**/api/v1/stocks/999999/quote', (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ statusCode: 404, message: 'Stock not found', error: 'Not Found' }),
+    }),
+  );
+  await page.route('**/api/v1/stocks/**/history*', (route) => {
+    historyCalls.push(route.request().url());
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.goto('/');
+  await page.getByPlaceholder('2330').fill('999999');
+  await page.getByRole('button', { name: '查詢' }).click();
+
+  await expect(page.getByText('查無此股票代號')).toBeVisible();
+  await expect(page.getByTestId('stock-history-chart')).not.toBeVisible();
+  expect(historyCalls.length).toBe(0);
+});
+
+test('quote upstream 500 displays 查詢失敗，請稍後再試 without requesting history', async ({ page }) => {
+  const historyCalls: string[] = [];
+  await page.route('**/api/v1/stocks/999999/quote', (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ statusCode: 500, message: 'Internal Server Error' }),
+    }),
+  );
+  await page.route('**/api/v1/stocks/**/history*', (route) => {
+    historyCalls.push(route.request().url());
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.goto('/');
+  await page.getByPlaceholder('2330').fill('999999');
+  await page.getByRole('button', { name: '查詢' }).click();
+
+  await expect(page.getByText('查詢失敗，請稍後再試')).toBeVisible();
+  await expect(page.getByTestId('stock-history-chart')).not.toBeVisible();
+  expect(historyCalls.length).toBe(0);
+});
+
+test('switching from valid stock to invalid stock removes old chart and displays 404', async ({ page }) => {
+  const invalidHistoryCalls: string[] = [];
+  await page.route('**/api/v1/stocks/2330/quote', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(QUOTE_BODY),
+    }),
+  );
+  await page.route('**/api/v1/stocks/2330/history*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(historyBody('1m', 568)),
+    }),
+  );
+  await page.route('**/api/v1/stocks/999999/quote', (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ statusCode: 404, message: 'Stock not found', error: 'Not Found' }),
+    }),
+  );
+  await page.route('**/api/v1/stocks/999999/history*', (route) => {
+    invalidHistoryCalls.push(route.request().url());
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.goto('/');
+  await page.getByPlaceholder('2330').fill('2330');
+  await page.getByRole('button', { name: '查詢' }).click();
+
+  await expect(page.getByText('2330 台積電')).toBeVisible();
+  await expect(page.getByTestId('stock-history-chart')).toBeVisible();
+
+  // Switch to invalid symbol
+  await page.getByPlaceholder('2330').fill('999999');
+  await page.getByRole('button', { name: '查詢' }).click();
+
+  await expect(page.getByText('查無此股票代號')).toBeVisible();
+  await expect(page.getByTestId('stock-history-chart')).not.toBeVisible();
+  expect(invalidHistoryCalls.length).toBe(0);
+});
+

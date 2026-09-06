@@ -147,6 +147,24 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     expect(res.body).toEqual(GENERIC_FAILURE);
   });
 
+  it('returns HTTP 404 Not Found on Fugle 404 without calling MIS', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = mockUpstreams(
+      jsonResponse({ message: 'Resource Not Found' }, 404),
+      jsonResponse(MIS_FIXTURE),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/999999/quote').expect(404);
+
+    expect(res.body).toEqual({
+      statusCode: 404,
+      message: 'Stock not found',
+      error: 'Not Found',
+    });
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+
   it('fails safe without leaking on invalid upstream schema', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockFugle(200, { bogus: true, serial: 1 });

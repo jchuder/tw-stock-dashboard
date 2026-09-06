@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, JSX } from 'react';
 import { toast } from 'sonner';
-import { fetchStockQuote } from '../api/stock-quote.api.js';
+import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.js';
 
 const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
@@ -16,7 +16,13 @@ function formatSigned(value: number, suffix = ''): string {
   return `${value >= 0 ? '+' : ''}${value}${suffix}`;
 }
 
-export function StockQuotePanel({ onSymbolSubmitted }: { onSymbolSubmitted?: (symbol: string) => void }): JSX.Element {
+export function StockQuotePanel({
+  onSymbolSubmitted,
+  onQuoteResolved,
+}: {
+  onSymbolSubmitted?: (symbol: string) => void;
+  onQuoteResolved?: (symbol: string) => void;
+}): JSX.Element {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState<string | null>(null);
   const previousProvider = useRef<'fugle' | 'twse-mis' | null>(null);
@@ -31,6 +37,12 @@ export function StockQuotePanel({ onSymbolSubmitted }: { onSymbolSubmitted?: (sy
     enabled: submitted !== null,
     retry: false,
   });
+
+  useEffect(() => {
+    if (quote.isSuccess && quote.data && submitted !== null && quote.data.symbol === submitted) {
+      onQuoteResolved?.(quote.data.symbol);
+    }
+  }, [quote.isSuccess, quote.data, submitted, onQuoteResolved]);
 
   useEffect(() => {
     const data = quote.data;
@@ -82,7 +94,13 @@ export function StockQuotePanel({ onSymbolSubmitted }: { onSymbolSubmitted?: (sy
         <button type="submit">查詢</button>
       </form>
       {quote.isPending && submitted !== null && <p>載入中…</p>}
-      {quote.isError && <p>查詢失敗，請稍後再試</p>}
+      {quote.isError && (
+        quote.error instanceof StockQuoteRequestError && quote.error.status === 404 ? (
+          <p>查無此股票代號</p>
+        ) : (
+          <p>查詢失敗，請稍後再試</p>
+        )
+      )}
       {quote.isSuccess && source && (
         <div>
           <p>

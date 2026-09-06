@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, InternalServerErrorException, Param } from '@nestjs/common';
+import { Controller, Get, Inject, InternalServerErrorException, NotFoundException, Param } from '@nestjs/common';
 import { Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
@@ -21,6 +21,9 @@ export class StockQuoteController {
   async getQuote(@Param('symbol') symbol: string): Promise<StockQuoteResponse> {
     const result = await Effect.runPromise(Effect.either(this.stockQuoteService.getQuote(symbol)));
     if (Either.isLeft(result)) {
+      if (result.left._tag === 'StockNotFoundError') {
+        throw new NotFoundException('Stock not found');
+      }
       const failure = failedLog(symbol, result.left);
       this.logger.error(failure);
       addSpanEvent('market_data.quote_failed', {
