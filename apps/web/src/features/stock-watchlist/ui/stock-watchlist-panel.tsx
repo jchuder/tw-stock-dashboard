@@ -17,15 +17,19 @@ export function StockWatchlistPanel({
   if (items.length === 0) {
     return (
       <section aria-label="自選股清單" className="watchlist-card">
-        <h3>自選觀察</h3>
-        <p style={{ color: '#64748b', fontSize: '0.875rem', margin: 0 }}>尚無自選股票</p>
+        <div className="section-head">
+          <h3>自選觀察清單</h3>
+        </div>
+        <p style={{ color: '#64748b', fontSize: '0.875rem', margin: '0 18px 16px' }}>尚無自選股票</p>
       </section>
     );
   }
 
   return (
     <section aria-label="自選股清單" className="watchlist-card">
-      <h3>自選觀察</h3>
+      <div className="section-head">
+        <h3>自選觀察清單</h3>
+      </div>
       <ul className="watchlist-list" data-testid="watchlist-container">
         {items.map((item) => {
           const isActive = activeSymbol === item.symbol;

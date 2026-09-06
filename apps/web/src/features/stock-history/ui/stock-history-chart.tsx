@@ -1,16 +1,15 @@
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import { CandlestickSeries, HistogramSeries, LineSeries, createChart } from 'lightweight-charts';
+import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart } from 'lightweight-charts';
 import type { ISeriesApi } from 'lightweight-charts';
 import type { Candle, Timeframe } from '@tw-stock-dashboard/contracts';
 import { isIntradayAxis, toChartTime } from './chart-time.js';
 
 // Taiwan market convention: up is red, down is green. Kept as plain
-// component constants — no theme system until a second theme exists.
-const UP_COLOR = '#f23645';
-const DOWN_COLOR = '#089981';
-const UP_VOLUME_COLOR = 'rgba(242, 54, 69, 0.2)';
-const DOWN_VOLUME_COLOR = 'rgba(8, 153, 129, 0.2)';
+const UP_COLOR = '#d94b45';
+const DOWN_COLOR = '#169a52';
+const UP_VOLUME_COLOR = 'rgba(217, 75, 69, 0.2)';
+const DOWN_VOLUME_COLOR = 'rgba(22, 154, 82, 0.2)';
 
 // Component-level color constants for simple moving average lines.
 const MA5_COLOR = '#ff9800';
@@ -74,24 +73,28 @@ export function StockHistoryChart({
     const ma5Series = chart.addSeries(LineSeries, {
       color: MA5_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
       lastValueVisible: false,
     });
     const ma10Series = chart.addSeries(LineSeries, {
       color: MA10_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
       lastValueVisible: false,
     });
     const ma20Series = chart.addSeries(LineSeries, {
       color: MA20_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
       lastValueVisible: false,
     });
     const ma60Series = chart.addSeries(LineSeries, {
       color: MA60_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
       lastValueVisible: false,
     });

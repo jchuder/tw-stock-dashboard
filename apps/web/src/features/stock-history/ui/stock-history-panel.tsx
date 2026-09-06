@@ -16,11 +16,11 @@ const RANGES: ReadonlyArray<{ value: HistoryRange; label: string }> = [
   { value: '1y', label: '1Y' },
 ];
 
-const MA_KEYS: ReadonlyArray<{ key: keyof MaVisibility; label: string; color: string }> = [
-  { key: 'ma5', label: 'MA5', color: '#ff9800' },
-  { key: 'ma10', label: 'MA10', color: '#2196f3' },
-  { key: 'ma20', label: 'MA20', color: '#9c27b0' },
-  { key: 'ma60', label: 'MA60', color: '#4caf50' },
+const MA_KEYS: ReadonlyArray<{ key: keyof MaVisibility; label: string }> = [
+  { key: 'ma5', label: 'MA5' },
+  { key: 'ma10', label: 'MA10' },
+  { key: 'ma20', label: 'MA20' },
+  { key: 'ma60', label: 'MA60' },
 ];
 
 const TIMEFRAME_LABELS: Record<Timeframe, string> = {
@@ -77,13 +77,12 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
     <section aria-label="股價走勢" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div className="dashboard-card" style={{ padding: '12px 16px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600, marginRight: '4px' }}>期間</span>
+          <div className="periods" role="group" aria-label="K 線期間">
             {RANGES.map((option) => (
               <button
                 key={option.value}
                 type="button"
-                className="btn-control"
+                className={`period-btn${range === option.value ? ' active' : ''}`}
                 aria-pressed={range === option.value}
                 onClick={() => setRange(option.value)}
               >
@@ -91,36 +90,25 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
               </button>
             ))}
           </div>
-          <div
-            style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}
-            aria-label="均線圖例，點選切換顯示"
-          >
-            {MA_KEYS.map(({ key, label, color }) => {
+          <div className="chart-legend" aria-label="均線圖例，點選切換顯示">
+            {MA_KEYS.map(({ key, label }) => {
               const visible = maVisibility[key];
               return (
                 <button
                   key={key}
                   type="button"
-                  className="btn-ma-legend"
+                  className={`legend-item series-legend-toggle${visible ? '' : ' is-off'}`}
                   aria-pressed={visible}
                   aria-label={`${label} ${visible ? '顯示中' : '已隱藏'}，點選切換`}
+                  title={`切換 ${label}`}
                   onClick={() => toggleMa(key)}
-                  style={{ opacity: visible ? 1 : 0.35 }}
                 >
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      display: 'inline-block',
-                      width: '16px',
-                      height: '3px',
-                      borderRadius: '2px',
-                      backgroundColor: color,
-                    }}
-                  />
+                  <span aria-hidden="true" className={`legend-swatch ${key}`} />
                   {label}
                 </button>
               );
             })}
+            <span className="chart-toggle-hint">點按左側圖例可切換顯示</span>
           </div>
         </div>
         <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '8px 0 0' }}>MA 依目前 K 線週期計算</p>
@@ -139,7 +127,10 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
           </div>
 
           <div className="table-card">
-            <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: '#64748b' }}>最近交易資料</h4>
+            <div className="section-head">
+              <h3>近期交易資料</h3>
+              <span className="mini-meta" style={{ fontSize: '12px' }}>最近 5 個交易日</span>
+            </div>
             {tablePending && <p style={{ color: '#64748b' }}>表格載入中…</p>}
             {tableError && <p style={{ color: '#dc2626' }}>表格載入失敗，請稍後再試</p>}
             {tableCandles !== null && tableCandles.length > 0 && (
@@ -147,10 +138,10 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
                 <thead>
                   <tr>
                     <th>日期</th>
-                    <th>開盤</th>
-                    <th>收盤</th>
-                    <th>最高</th>
-                    <th>最低</th>
+                    <th>開盤價</th>
+                    <th>收盤價</th>
+                    <th>最高價</th>
+                    <th>最低價</th>
                     <th>成交量（股）</th>
                   </tr>
                 </thead>

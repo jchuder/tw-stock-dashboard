@@ -3,12 +3,13 @@ import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { toast } from 'sonner';
 import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.js';
+import { formatTaipeiDateTime } from '../../../shared/datetime/format-taipei.js';
 
 const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
 
 const PROVIDER_LABELS = {
-  fugle: 'Fugle',
+  fugle: 'Fugle API Connected',
   'twse-mis': 'TWSE MIS',
 } as const;
 
@@ -17,9 +18,9 @@ const MARKET_LABELS = {
   TPEX: '上櫃',
 } as const;
 
-const COLOR_UP = '#dc2626';
-const COLOR_DOWN = '#16a34a';
-const COLOR_FLAT = '#64748b';
+const COLOR_UP = '#d94b45';
+const COLOR_DOWN = '#169a52';
+const COLOR_FLAT = '#59605c';
 
 function formatSigned(value: number, suffix = ''): string {
   return `${value >= 0 ? '+' : ''}${value}${suffix}`;
@@ -99,16 +100,17 @@ export function StockQuotePanel({
       )}
       {quote.isSuccess && source && (
         <div data-testid="stock-quote-info">
+          <div className="eyebrow">焦點個股分析</div>
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
+              gap: '9px',
               flexWrap: 'wrap',
               marginBottom: '10px',
             }}
           >
-            <span data-testid="stock-quote-title" style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
+            <span data-testid="stock-quote-title" style={{ fontSize: '21px', fontWeight: 'bold', margin: 0 }}>
               {quote.data.symbol} {quote.data.name}
             </span>
             <span data-testid="stock-quote-market" className="badge-market">
@@ -123,7 +125,13 @@ export function StockQuotePanel({
               title={isInWatchlist === true ? '從自選移除' : '加入自選'}
               className="btn-star"
             >
-              {isInWatchlist === true ? '★' : '☆'}
+              {isInWatchlist === true ? (
+                <>
+                  <span className="star-icon" aria-hidden="true">★</span> 已在觀察
+                </>
+              ) : (
+                '☆ 加入觀察'
+              )}
             </button>
           </div>
           <div
@@ -148,22 +156,24 @@ export function StockQuotePanel({
             />
           </div>
           <div data-testid="focus-quote-grid" className="focus-quote-grid">
-            <QuoteCell label="開盤" value={formatNullable(quote.data.openPrice)} />
-            <QuoteCell label="最高" value={formatNullable(quote.data.highPrice)} />
-            <QuoteCell label="最低" value={formatNullable(quote.data.lowPrice)} />
+            <QuoteCell label="開盤價" value={formatNullable(quote.data.openPrice)} compare={quote.data.openPrice} previousClose={quote.data.previousClose} />
+            <QuoteCell label="最高價" value={formatNullable(quote.data.highPrice)} compare={quote.data.highPrice} previousClose={quote.data.previousClose} />
+            <QuoteCell label="最低價" value={formatNullable(quote.data.lowPrice)} compare={quote.data.lowPrice} previousClose={quote.data.previousClose} />
             <QuoteCell
               label="成交量（張）"
               value={quote.data.tradeVolume === null ? '—' : quote.data.tradeVolume.toLocaleString()}
             />
-            <QuoteCell label="漲停價" value={formatNullable(quote.data.limitUpPrice)} />
-            <QuoteCell label="跌停價" value={formatNullable(quote.data.limitDownPrice)} />
+            <QuoteCell label="漲停價" value={formatNullable(quote.data.limitUpPrice)} tone="up" />
+            <QuoteCell label="跌停價" value={formatNullable(quote.data.limitDownPrice)} tone="down" />
           </div>
           <div className="quote-meta-row">
             <span>交易日行情{quote.data.tradeDate !== null ? ` ${quote.data.tradeDate}` : ''}</span>
             <span>昨收 {quote.data.previousClose}</span>
             <span>資料來源：{PROVIDER_LABELS[source.provider]}</span>
             {source.cacheHit && <span className="badge-cache">快取</span>}
-            {source.asOf !== null && <span>資料時間：{new Date(source.asOf).toLocaleString()}</span>}
+          </div>
+          <div className="quote-meta-row">
+            {source.asOf !== null && <span>最後更新時間：{formatTaipeiDateTime(source.asOf)}</span>}
           </div>
         </div>
       )}
@@ -201,11 +211,31 @@ function ChangeLine({
   );
 }
 
-function QuoteCell({ label, value }: { label: string; value: string }): JSX.Element {
+function QuoteCell({
+  label,
+  value,
+  compare,
+  previousClose,
+  tone,
+}: {
+  label: string;
+  value: string;
+  compare?: number | null;
+  previousClose?: number;
+  tone?: 'up' | 'down';
+}): JSX.Element {
+  let toneClass = '';
+  if (tone === 'up') {
+    toneClass = 'price-up';
+  } else if (tone === 'down') {
+    toneClass = 'price-down';
+  } else if (compare !== null && compare !== undefined && previousClose !== undefined) {
+    toneClass = compare > previousClose ? 'price-up' : compare < previousClose ? 'price-down' : '';
+  }
   return (
     <div className="focus-quote-cell">
       <span className="focus-quote-cell-label">{label}</span>
-      <span className="focus-quote-cell-value">{value}</span>
+      <span className={`focus-quote-cell-value ${toneClass}`}>{value}</span>
     </div>
   );
 }
