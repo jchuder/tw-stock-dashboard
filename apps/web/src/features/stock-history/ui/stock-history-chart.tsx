@@ -186,7 +186,7 @@ export function StockHistoryChart({
   return (
     <div>
       <div ref={containerRef} data-testid="stock-history-chart" className="chart-wrapper" />
-      <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '8px 0 0' }}>
+      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '8px 0 0' }}>
         TradingView Lightweight Charts™
         <br />
         Copyright © 2025 TradingView, Inc.

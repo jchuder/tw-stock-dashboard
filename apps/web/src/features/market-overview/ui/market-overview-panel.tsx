@@ -76,7 +76,7 @@ export function MarketOverviewPanel(): JSX.Element {
               <div className={`big-number ${changeClass(institutional.totalNetAmount)}`}>
                 {formatYiAmount(institutional.totalNetAmount)}
               </div>
-              <div className="mini-meta">盤後資料 · {formatTaipeiDate(institutional.asOf)}</div>
+              <div className="mini-meta">盤後資料：{formatTaipeiDate(institutional.asOf)}</div>
             </div>
             <div className="institution-lines">
               <div className="inst-row">

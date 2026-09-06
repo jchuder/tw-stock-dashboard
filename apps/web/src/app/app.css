@@ -133,13 +133,12 @@ button {
   letter-spacing: -0.6px;
 }
 
-/* Common Card */
+/* Common Card: flat inner cards — only the app shell carries a shadow. */
 .dashboard-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-card);
   padding: 16px;
-  box-shadow: var(--shadow-card);
 }
 
 /* Market Overview */
@@ -353,14 +352,13 @@ button {
 }
 
 .badge-cache {
-  background-color: #e0f2fe;
-  color: #0284c7;
+  background-color: #f0f2f1;
+  color: #616864;
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.75rem;
   font-weight: 600;
 }
-
 /* Header global search */
 .header-search {
   display: flex;
@@ -555,7 +553,6 @@ button {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-card);
   padding: 0;
-  box-shadow: var(--shadow-card);
 }
 
 .watchlist-card h3 {
@@ -642,11 +639,10 @@ button {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-card);
   padding: 16px;
-  box-shadow: var(--shadow-card);
 }
 
 .chart-wrapper {
-  height: 420px;
+  height: 340px;
   position: relative;
 }
 
@@ -655,7 +651,6 @@ button {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
   overflow-x: auto;
   margin-top: 14px;
   padding: 0;
@@ -793,7 +788,7 @@ button {
   }
 
   .chart-wrapper {
-    height: 320px;
+    height: 340px;
   }
 
   .table-card th,

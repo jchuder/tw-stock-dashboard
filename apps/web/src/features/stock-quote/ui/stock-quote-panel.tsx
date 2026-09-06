@@ -90,12 +90,12 @@ export function StockQuotePanel({
 
   return (
     <section aria-label="個股行情">
-      {quote.isPending && <p style={{ color: '#64748b', margin: '8px 0 0' }}>載入中…</p>}
+      {quote.isPending && <p style={{ color: 'var(--text-muted)', margin: '8px 0 0' }}>載入中…</p>}
       {quote.isError && (
         quote.error instanceof StockQuoteRequestError && quote.error.status === 404 ? (
-          <p style={{ color: '#dc2626', margin: '8px 0 0' }}>查無此股票代號</p>
+          <p style={{ color: 'var(--color-up)', margin: '8px 0 0' }}>查無此股票代號</p>
         ) : (
-          <p style={{ color: '#dc2626', margin: '8px 0 0' }}>查詢失敗，請稍後再試</p>
+          <p style={{ color: 'var(--color-up)', margin: '8px 0 0' }}>查詢失敗，請稍後再試</p>
         )
       )}
       {quote.isSuccess && source && (

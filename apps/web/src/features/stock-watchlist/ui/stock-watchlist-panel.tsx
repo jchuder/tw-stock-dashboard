@@ -20,7 +20,7 @@ export function StockWatchlistPanel({
         <div className="section-head">
           <h3>自選觀察清單</h3>
         </div>
-        <p style={{ color: '#64748b', fontSize: '0.875rem', margin: '0 18px 16px' }}>尚無自選股票</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0 18px 16px' }}>尚無自選股票</p>
       </section>
     );
   }
