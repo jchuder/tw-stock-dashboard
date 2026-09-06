@@ -5,7 +5,7 @@ import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
 import { epochMsToIsoOrNull } from './timestamp.js';
 import { TwseMisDecodeError, TwseMisHttpError, TwseMisNetworkError, TwseMisTimeoutError } from './twse-mis-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
-import { TwseMisQuoteSchema, parseFiniteNumber, round2 } from './twse-mis-quote.schema.js';
+import { TwseMisQuoteSchema, parseFiniteNumber, parseMisTradeDate, round2 } from './twse-mis-quote.schema.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 const TWSE_MIS_URL = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
@@ -49,6 +49,8 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
         return yield* new TwseMisDecodeError({ stage: 'value' });
       }
 
+      // Enriched session fields are best-effort: `-`/absent/invalid degrade
+      // to null. Limit prices come only from u/w — never computed.
       const quote = yield* Schema.decodeUnknown(StockQuoteSchema)({
         symbol: entry.c,
         name: entry.n,
@@ -57,6 +59,13 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
         previousClose,
         change: round2(price - previousClose),
         changePercent: round2(((price - previousClose) / previousClose) * 100),
+        tradeDate: parseMisTradeDate(entry.d),
+        openPrice: entry.o === undefined ? null : parseFiniteNumber(entry.o),
+        highPrice: entry.h === undefined ? null : parseFiniteNumber(entry.h),
+        lowPrice: entry.l === undefined ? null : parseFiniteNumber(entry.l),
+        tradeVolume: entry.v === undefined ? null : parseFiniteNumber(entry.v),
+        limitUpPrice: entry.u === undefined ? null : parseFiniteNumber(entry.u),
+        limitDownPrice: entry.w === undefined ? null : parseFiniteNumber(entry.w),
       }).pipe(Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })));
       return { quote, asOf: toIsoOrNull(entry.tlong) };
     });
