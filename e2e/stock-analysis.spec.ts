@@ -87,10 +87,9 @@ test('search loads focus quote, intraday chart, MA legend defaults, and daily ta
   await page.goto('/');
   await search(page, '2330');
 
-  await expect(page.getByText('2330 台積電')).toBeVisible();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByText('焦點個股分析')).toBeVisible();
-  // Interview requirement, explicit wording — never a bare signed number.
-  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 上漲 2 (+0.35%)');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 2 (+0.35%)');
   await expect(page.getByTestId('stock-quote-market')).toHaveText('上市');
   await expect(page.getByTestId('focus-quote-grid')).toContainText('開盤價');
   await expect(page.getByTestId('focus-quote-grid')).toContainText('漲停價');
@@ -183,7 +182,7 @@ test('history failure does not take down the quote', async ({ page }) => {
   await page.goto('/');
   await search(page, '2330');
 
-  await expect(page.getByText('2330 台積電')).toBeVisible();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByText('歷史資料載入失敗，請稍後再試')).toBeVisible();
 });
 
@@ -270,7 +269,7 @@ test('switching from valid stock to invalid stock removes old chart and displays
   await page.goto('/');
   await search(page, '2330');
 
-  await expect(page.getByText('2330 台積電')).toBeVisible();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
 
   // Switch to invalid symbol

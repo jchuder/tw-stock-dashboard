@@ -48,6 +48,21 @@ describe('stock-watchlist model', () => {
     expect(loaded).toEqual(data);
   });
 
+  it('seeds 2330 on first run when the storage key is absent', () => {
+    const loaded = loadWatchlist();
+
+    expect(loaded).toEqual([{ symbol: '2330', name: '台積電' }]);
+    expect(globalThis.localStorage.getItem(WATCHLIST_STORAGE_KEY)).toBe(
+      JSON.stringify([{ symbol: '2330', name: '台積電' }]),
+    );
+  });
+
+  it('respects an explicitly cleared empty watchlist without reseeding', () => {
+    globalThis.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify([]));
+
+    expect(loadWatchlist()).toEqual([]);
+  });
+
   it('safely falls back to empty array on corrupted json or invalid schema', () => {
     globalThis.localStorage.setItem(WATCHLIST_STORAGE_KEY, 'invalid json {');
     expect(loadWatchlist()).toEqual([]);

@@ -115,6 +115,6 @@ test('market overview 500 error does NOT break stock search', async ({ page }) =
   await page.getByPlaceholder('請輸入股票代號').fill('2330');
   await page.getByRole('button', { name: '搜尋' }).click();
 
-  await expect(page.getByText('2330 台積電')).toBeVisible();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByText('568')).toBeVisible();
 });

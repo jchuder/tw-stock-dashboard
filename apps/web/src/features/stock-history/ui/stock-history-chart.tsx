@@ -1,9 +1,21 @@
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart } from 'lightweight-charts';
-import type { ISeriesApi } from 'lightweight-charts';
+import {
+  CandlestickSeries,
+  CrosshairMode,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
+  createChart,
+} from 'lightweight-charts';
+import type { ISeriesApi, Time } from 'lightweight-charts';
 import type { Candle, Timeframe } from '@tw-stock-dashboard/contracts';
-import { isIntradayAxis, toChartTime } from './chart-time.js';
+import {
+  formatChartCrosshairTime,
+  formatChartTick,
+  isIntradayAxis,
+  toChartTime,
+} from './chart-time.js';
 
 // Taiwan market convention: up is red, down is green. Kept as plain
 const UP_COLOR = '#d94b45';
@@ -48,6 +60,11 @@ export function StockHistoryChart({
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma60SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const timeframeRef = useRef<Timeframe>(timeframe);
+
+  useEffect(() => {
+    timeframeRef.current = timeframe;
+  }, [timeframe]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -56,7 +73,26 @@ export function StockHistoryChart({
     }
     const chart = createChart(container, {
       autoSize: true,
-      timeScale: { timeVisible: true, secondsVisible: false },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#383e3a',
+        },
+        horzLine: {
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#383e3a',
+        },
+      },
+      localization: {
+        locale: 'zh-TW',
+        timeFormatter: (time: Time) => formatChartCrosshairTime(time, timeframeRef.current),
+      },
+      timeScale: {
+        timeVisible: isIntradayAxis(timeframeRef.current),
+        secondsVisible: false,
+        tickMarkFormatter: (time: Time) => formatChartTick(time, timeframeRef.current),
+      },
     });
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: UP_COLOR,
@@ -75,28 +111,28 @@ export function StockHistoryChart({
       lineWidth: 2,
       lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
     const ma10Series = chart.addSeries(LineSeries, {
       color: MA10_COLOR,
       lineWidth: 2,
       lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
     const ma20Series = chart.addSeries(LineSeries, {
       color: MA20_COLOR,
       lineWidth: 2,
       lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
     const ma60Series = chart.addSeries(LineSeries, {
       color: MA60_COLOR,
       lineWidth: 2,
       lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
 
     candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.22 } });

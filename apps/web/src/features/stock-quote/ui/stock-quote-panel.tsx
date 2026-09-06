@@ -3,7 +3,6 @@ import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { toast } from 'sonner';
 import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.js';
-import { formatTaipeiDateTime } from '../../../shared/datetime/format-taipei.js';
 
 const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
@@ -38,7 +37,10 @@ export function StockQuotePanel({
 }: {
   requestedSymbol?: string | null;
   searchSeq?: number;
-  onQuoteResolved?: (stock: { symbol: string; name: string }) => void;
+  onQuoteResolved?: (
+    stock: { symbol: string; name: string },
+    info: { provider: 'fugle' | 'twse-mis'; asOf: string | null },
+  ) => void;
   isInWatchlist?: boolean;
   onToggleWatchlist?: () => void;
 }): JSX.Element {
@@ -58,7 +60,10 @@ export function StockQuotePanel({
 
   useEffect(() => {
     if (quote.isSuccess && quote.data && quote.data.symbol === requestedSymbol) {
-      onQuoteResolved?.({ symbol: quote.data.symbol, name: quote.data.name });
+      onQuoteResolved?.(
+        { symbol: quote.data.symbol, name: quote.data.name },
+        { provider: quote.data.source.provider, asOf: quote.data.source.asOf },
+      );
     }
   }, [quote.isSuccess, quote.data, requestedSymbol, onQuoteResolved]);
 
@@ -135,6 +140,8 @@ export function StockQuotePanel({
             </button>
           </div>
           <div
+            role="group"
+            aria-label={`目前股價 ${quote.data.price}，較前一交易日${quote.data.change > 0 ? '上漲' : quote.data.change < 0 ? '下跌' : '持平'} ${Math.abs(quote.data.change)}，漲幅 ${quote.data.changePercent}%`}
             style={{
               display: 'flex',
               alignItems: 'baseline',
@@ -152,7 +159,6 @@ export function StockQuotePanel({
             <ChangeLine
               change={quote.data.change}
               changePercent={quote.data.changePercent}
-              previousClose={quote.data.previousClose}
             />
           </div>
           <div data-testid="focus-quote-grid" className="focus-quote-grid">
@@ -172,9 +178,6 @@ export function StockQuotePanel({
             <span>資料來源：{PROVIDER_LABELS[source.provider]}</span>
             {source.cacheHit && <span className="badge-cache">快取</span>}
           </div>
-          <div className="quote-meta-row">
-            {source.asOf !== null && <span>最後更新時間：{formatTaipeiDateTime(source.asOf)}</span>}
-          </div>
         </div>
       )}
     </section>
@@ -184,29 +187,27 @@ export function StockQuotePanel({
 function ChangeLine({
   change,
   changePercent,
-  previousClose,
 }: {
   change: number;
   changePercent: number;
-  previousClose: number;
 }): JSX.Element {
   if (change > 0) {
     return (
       <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_UP }}>
-        較前一交易日 上漲 {change} ({formatSigned(changePercent, '%')})
+        ▲ {change} ({formatSigned(changePercent, '%')})
       </span>
     );
   }
   if (change < 0) {
     return (
       <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_DOWN }}>
-        較前一交易日 下跌 {Math.abs(change)} ({formatSigned(changePercent, '%')})
+        ▼ {Math.abs(change)} ({formatSigned(changePercent, '%')})
       </span>
     );
   }
   return (
     <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_FLAT }}>
-      較前一交易日持平 (昨收 {previousClose})
+      0 (0.00%)
     </span>
   );
 }

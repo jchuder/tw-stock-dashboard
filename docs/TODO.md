@@ -12,6 +12,8 @@ implement them opportunistically — each needs its own design and review.
 
 ### Market Overview
 
+* TAIEX / OTC market trading volume
+  * confirm official source and unit semantics before extending contract
 * TAIEX / OTC sparkline
 * 需要index history資料
 

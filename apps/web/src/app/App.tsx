@@ -1,33 +1,39 @@
-import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { JSX } from 'react';
 import { Toaster } from 'sonner';
 import { MarketOverviewPanel } from '../features/market-overview/index.js';
 import { GlobalStockSearch } from '../features/stock-quote/index.js';
+import { loadWatchlist } from '../features/stock-watchlist/index.js';
 import { StockAnalysis } from '../widgets/stock-analysis/index.js';
-import { fetchHealth } from '../shared/api/health.js';
+import { formatTaipeiDateTime } from '../shared/datetime/format-taipei.js';
 import './app.css';
 
+export interface QuoteProvenance {
+  provider: 'fugle' | 'twse-mis';
+  asOf: string | null;
+}
+
+const PROVIDER_LABELS = {
+  fugle: 'Fugle API Connected',
+  'twse-mis': 'TWSE MIS',
+} as const;
+
 export function App(): JSX.Element {
-  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, retry: false });
-  const [search, setSearch] = useState<{ symbol: string; seq: number } | null>(null);
+  // Boot focus: the first watchlist item (seeded with 2330 on first run) is
+  // queried immediately so the dashboard never opens on an empty analysis.
+  // The search box stays empty — it is an input control, not a selection
+  // mirror, so the two are deliberately not synced.
+  const [search, setSearch] = useState<{ symbol: string; seq: number } | null>(() => {
+    const first = loadWatchlist()[0];
+    return first === undefined ? null : { symbol: first.symbol, seq: 0 };
+  });
+  const [provenance, setProvenance] = useState<QuoteProvenance | null>(null);
 
   // Re-submitting the same symbol must still refresh: the seq busts the
   // quote query key so TanStack refetches instead of serving cache.
   const onSearch = (symbol: string): void => {
     setSearch((prev) => ({ symbol, seq: (prev?.seq ?? 0) + 1 }));
   };
-
-  let statusClass = 'checking';
-  let statusText = 'API: Checking…';
-
-  if (health.isSuccess) {
-    statusClass = 'connected';
-    statusText = 'API Connected';
-  } else if (health.isError) {
-    statusClass = 'disconnected';
-    statusText = 'API Disconnected';
-  }
 
   return (
     <div className="dashboard-container">
@@ -36,9 +42,17 @@ export function App(): JSX.Element {
           <h1>Taiwan Stock Dashboard</h1>
         </div>
         <GlobalStockSearch onSearch={onSearch} />
-        <div className="api-status-badge" role="status" aria-label="API 連線狀態">
-          <span className={`status-dot ${statusClass}`} />
-          <span>{statusText}</span>
+        <div className="top-actions">
+          <div className="top-meta">
+            <div>
+              <strong>資料來源：</strong>
+              {provenance === null ? '—' : PROVIDER_LABELS[provenance.provider]}
+            </div>
+            <div>
+              最後更新：
+              {provenance?.asOf == null ? '—' : formatTaipeiDateTime(provenance.asOf)}
+            </div>
+          </div>
         </div>
       </header>
       <main className="dashboard-main">
@@ -50,6 +64,7 @@ export function App(): JSX.Element {
           requestedSymbol={search?.symbol ?? null}
           searchSeq={search?.seq ?? 0}
           onSymbolSubmitted={onSearch}
+          onProvenance={setProvenance}
         />
       </main>
       <Toaster closeButton />

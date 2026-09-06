@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isIntradayAxis, TAIPEI_UTC_OFFSET_SECONDS, toChartTime } from './chart-time.js';
+import {
+  formatChartCrosshairTime,
+  formatChartTick,
+  isIntradayAxis,
+  TAIPEI_UTC_OFFSET_SECONDS,
+  toChartTime,
+} from './chart-time.js';
 
 describe('chart-time', () => {
   it('keeps daily candles as business-day strings', () => {
@@ -29,4 +35,17 @@ describe('chart-time', () => {
     expect(isIntradayAxis('5m')).toBe(true);
     expect(isIntradayAxis('1d')).toBe(false);
   });
+
+  it('formats tick and crosshair labels correctly for 5m intraday candles', () => {
+    const time = toChartTime('2026-09-04T09:00:00.000+08:00', '5m');
+    expect(formatChartTick(time, '5m')).toBe('09:00');
+    expect(formatChartCrosshairTime(time, '5m')).toBe('09/04 09:00');
+  });
+
+  it('formats tick and crosshair labels correctly for 1d daily candles', () => {
+    const time = toChartTime('2026-09-04', '1d');
+    expect(formatChartTick(time, '1d')).toBe('09/04');
+    expect(formatChartCrosshairTime(time, '1d')).toBe('2026/09/04');
+  });
 });
+

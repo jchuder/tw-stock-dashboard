@@ -121,6 +121,13 @@ export function StockHistoryFocus({
   );
 }
 
+function getPriceClass(value: number, prevClose: number | null): string | undefined {
+  if (prevClose === null) return undefined;
+  if (value > prevClose) return 'price-up';
+  if (value < prevClose) return 'price-down';
+  return undefined;
+}
+
 // Independent recent-trading card: always daily OHLCV. On an intraday chart
 // range it runs its own cached 1m daily query; on a daily range it joins the
 // same cache key the chart already uses, so no duplicate provider I/O.
@@ -133,6 +140,11 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
   });
 
   const tableCandles: ReadonlyArray<Candle> | null = table.data?.candles ?? null;
+  const rows = (tableCandles ?? []).map((candle, index, arr) => ({
+    ...candle,
+    prevClose: index > 0 ? arr[index - 1].close : null,
+  }));
+  const displayRows = rows.slice(-5).reverse();
 
   return (
     <div className="table-card">
@@ -157,19 +169,16 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
             </tr>
           </thead>
           <tbody>
-            {tableCandles
-              .slice(-5)
-              .reverse()
-              .map((candle) => (
-                <tr key={candle.date}>
-                  <td>{candle.date}</td>
-                  <td>{candle.open.toLocaleString()}</td>
-                  <td>{candle.close.toLocaleString()}</td>
-                  <td>{candle.high.toLocaleString()}</td>
-                  <td>{candle.low.toLocaleString()}</td>
-                  <td>{candle.volume.toLocaleString()}</td>
-                </tr>
-              ))}
+            {displayRows.map((candle) => (
+              <tr key={candle.date}>
+                <td>{candle.date}</td>
+                <td className={getPriceClass(candle.open, candle.prevClose)}>{candle.open.toLocaleString()}</td>
+                <td className={getPriceClass(candle.close, candle.prevClose)}>{candle.close.toLocaleString()}</td>
+                <td className={getPriceClass(candle.high, candle.prevClose)}>{candle.high.toLocaleString()}</td>
+                <td className={getPriceClass(candle.low, candle.prevClose)}>{candle.low.toLocaleString()}</td>
+                <td>{candle.volume.toLocaleString()}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}

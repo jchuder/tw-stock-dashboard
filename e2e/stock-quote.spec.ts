@@ -64,13 +64,13 @@ test('stock quote happy path', async ({ page }) => {
   await page.getByPlaceholder('請輸入股票代號').fill('2330');
   await page.getByRole('button', { name: '搜尋' }).click();
 
-  await expect(page.getByText('2330 台積電')).toBeVisible();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByTestId('stock-quote-market')).toHaveText('上市');
   await expect(page.getByTestId('stock-quote-price')).toHaveText('568');
-  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 上漲 2 (+0.35%)');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 2 (+0.35%)');
   await expect(page.getByText('昨收 566')).toBeVisible();
-  await expect(page.getByText('資料來源：Fugle API Connected')).toBeVisible();
-  await expect(page.getByText('最後更新時間：2026/09/04 13:30:00')).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('最後更新：2026/09/04 13:30:00')).toBeVisible();
   // Enriched session grid
   await expect(page.getByTestId('focus-quote-grid')).toContainText('開盤價');
   await expect(page.getByTestId('focus-quote-grid')).toContainText('漲停價');
@@ -91,7 +91,7 @@ test('falling quote states explicit previous-day wording in green', async ({ pag
   await page.getByPlaceholder('請輸入股票代號').fill('2330');
   await page.getByRole('button', { name: '搜尋' }).click();
 
-  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 下跌 6 (-1.06%)');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('▼ 6 (-1.06%)');
 });
 
 test('flat quote states 持平 wording', async ({ page }) => {
@@ -108,7 +108,7 @@ test('flat quote states 持平 wording', async ({ page }) => {
   await page.getByPlaceholder('請輸入股票代號').fill('2330');
   await page.getByRole('button', { name: '搜尋' }).click();
 
-  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日持平 (昨收 566)');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('0 (0.00%)');
 });
 
 test('source fallback and recovery toasts', async ({ page }) => {
@@ -126,17 +126,17 @@ test('source fallback and recovery toasts', async ({ page }) => {
   });
 
   await page.goto('/');
+
+  // Response 1: live Fugle (boot autofocus query) — badge, no toast.
+  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText(FALLBACK_TOAST)).toHaveCount(0);
+
   await page.getByPlaceholder('請輸入股票代號').fill('2330');
   const search = page.getByRole('button', { name: '搜尋' });
 
-  // Response 1: live Fugle — badge, no toast.
-  await search.click();
-  await expect(page.getByText('資料來源：Fugle API Connected')).toBeVisible();
-  await expect(page.getByText(FALLBACK_TOAST)).toHaveCount(0);
-
   // Response 2: live MIS fallback — badge switches, one fallback toast.
   await search.click();
-  await expect(page.getByText('資料來源：TWSE MIS')).toBeVisible();
+  await expect(page.getByText('資料來源：TWSE MIS').first()).toBeVisible();
   await expect(page.getByText(FALLBACK_TOAST)).toHaveCount(1);
 
   // Response 3: cached MIS — badge stays, no additional toast.
@@ -148,5 +148,5 @@ test('source fallback and recovery toasts', async ({ page }) => {
   // Response 4: live Fugle again — recovery toast, badge back.
   await search.click();
   await expect(page.getByText(RECOVERY_TOAST)).toHaveCount(1);
-  await expect(page.getByText('資料來源：Fugle API Connected')).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
 });

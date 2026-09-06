@@ -116,7 +116,7 @@ test('capture dashboard screenshot for documentation', async ({ page }) => {
   // Wait for quote, chart, and recent table to settle
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByTestId('stock-quote-price')).toHaveText('2410');
-  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 上漲 20 (+0.84%)');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 20 (+0.84%)');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
 
   // Docs screenshot shows the daily view with full MA context.

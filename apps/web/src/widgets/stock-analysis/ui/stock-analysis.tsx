@@ -14,17 +14,16 @@ import {
 import type { WatchlistItem } from '../../../features/stock-watchlist/index.js';
 
 // Stock analysis: left focus column (one focus card with quote, legend,
-// chart, and periods; recent table as its own card) plus a narrow right
-// watchlist rail. DOM order already matches the mobile order (focus quote,
-// chart, table, watchlist), so no CSS reordering is needed.
 export function StockAnalysis({
   requestedSymbol,
   searchSeq,
   onSymbolSubmitted,
+  onProvenance,
 }: {
   requestedSymbol: string | null;
   searchSeq: number;
   onSymbolSubmitted: (symbol: string) => void;
+  onProvenance?: (provenance: { provider: 'fugle' | 'twse-mis'; asOf: string | null } | null) => void;
 }): JSX.Element {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>(() => loadWatchlist());
   const [validatedStock, setValidatedStock] = useState<{ symbol: string; name: string } | null>(
@@ -43,8 +42,17 @@ export function StockAnalysis({
   useEffect(() => {
     if (requestedSymbol !== validatedStock?.symbol) {
       setValidatedStock(null);
+      onProvenance?.(null);
     }
-  }, [requestedSymbol, validatedStock?.symbol]);
+  }, [requestedSymbol, validatedStock?.symbol, onProvenance]);
+
+  const handleQuoteResolved = (
+    stock: { symbol: string; name: string },
+    info: { provider: 'fugle' | 'twse-mis'; asOf: string | null },
+  ): void => {
+    setValidatedStock(stock);
+    onProvenance?.(info);
+  };
 
   const onSelectWatchlistStock = (symbol: string): void => {
     if (symbol === requestedSymbol && validatedStock !== null) {
@@ -82,7 +90,7 @@ export function StockAnalysis({
           <StockQuotePanel
             requestedSymbol={requestedSymbol}
             searchSeq={searchSeq}
-            onQuoteResolved={setValidatedStock}
+            onQuoteResolved={handleQuoteResolved}
             isInWatchlist={isCurrentInWatchlist}
             onToggleWatchlist={validatedStock !== null ? onToggleCurrentWatchlist : undefined}
           />

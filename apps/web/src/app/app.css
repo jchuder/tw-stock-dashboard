@@ -84,6 +84,24 @@ button {
   font-size: 13px;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: #4e5551;
+  white-space: nowrap;
+}
+
+.top-meta {
+  text-align: right;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.top-meta strong {
+  color: #2e3430;
+}
+
 .api-status-badge {
   display: inline-flex;
   align-items: center;

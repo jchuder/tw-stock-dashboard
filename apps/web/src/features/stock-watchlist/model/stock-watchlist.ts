@@ -20,6 +20,8 @@ function getStorage(): Storage | null {
   return null;
 }
 
+const DEFAULT_WATCHLIST: ReadonlyArray<WatchlistItem> = [{ symbol: '2330', name: '台積電' }];
+
 export function loadWatchlist(): WatchlistItem[] {
   const storage = getStorage();
   if (!storage) {
@@ -27,6 +29,13 @@ export function loadWatchlist(): WatchlistItem[] {
   }
   try {
     const raw = storage.getItem(WATCHLIST_STORAGE_KEY);
+    // First run (key absent): seed the default focus stock. An explicitly
+    // cleared list ([]) or an invalid payload keeps the existing recovery
+    // behavior and is never reseeded.
+    if (raw === null) {
+      saveWatchlist(DEFAULT_WATCHLIST);
+      return [...DEFAULT_WATCHLIST];
+    }
     if (!raw) {
       return [];
     }

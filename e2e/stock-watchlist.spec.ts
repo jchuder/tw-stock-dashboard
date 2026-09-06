@@ -75,18 +75,30 @@ function historyRoute(symbol: string) {
   };
 }
 
-test('A & B: Add to watchlist and duplicate protection', async ({ page }) => {
+test('A & B: Seeded watchlist on first run, add new stock to watchlist, and duplicate protection', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
   });
   await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
+  await page.route('**/api/v1/stocks/2454/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2454) });
+  });
+  await page.route('**/api/v1/stocks/2454/history*', historyRoute('2454'));
 
   await page.goto('/');
 
-  // Search 2330
-  await page.getByPlaceholder('請輸入股票代號').fill('2330');
+  // First run seeds 2330 and autofocuses it
+  const watch2330 = page.getByTestId('watchlist-item-2330');
+  await expect(watch2330).toBeVisible();
+  await expect(watch2330).toContainText('2330 台積電');
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
+
+  // Search 2454 to add a new stock
+  await page.getByPlaceholder('請輸入股票代號').fill('2454');
   await page.getByRole('button', { name: '搜尋' }).click();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2454 聯發科');
 
   // Star action beside the title adds to the watchlist
   const starBtn = page.getByRole('button', { name: '加入自選' });
@@ -96,9 +108,9 @@ test('A & B: Add to watchlist and duplicate protection', async ({ page }) => {
   await starBtn.click();
 
   // Item appears in watchlist
-  const watchItem = page.getByTestId('watchlist-item-2330');
-  await expect(watchItem).toBeVisible();
-  await expect(watchItem).toContainText('2330 台積電');
+  const watch2454 = page.getByTestId('watchlist-item-2454');
+  await expect(watch2454).toBeVisible();
+  await expect(watch2454).toContainText('2454 聯發科');
 
   // Star turns into remove action and is pressed
   const pressed = page.getByRole('button', { name: '從自選移除' });
@@ -109,7 +121,10 @@ test('A & B: Add to watchlist and duplicate protection', async ({ page }) => {
   const storageContent = await page.evaluate(() =>
     localStorage.getItem('tw-stock-dashboard.watchlist.v1'),
   );
-  expect(JSON.parse(storageContent!)).toEqual([{ symbol: '2330', name: '台積電' }]);
+  expect(JSON.parse(storageContent!)).toEqual([
+    { symbol: '2330', name: '台積電' },
+    { symbol: '2454', name: '聯發科' },
+  ]);
 });
 
 test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
@@ -147,10 +162,11 @@ test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
   await expect(page.getByTestId('watchlist-item-2330')).toBeVisible();
   await expect(page.getByTestId('watchlist-item-2454')).toBeVisible();
 
-  // Ensure no quote or history request is made on reload
+  // Boot autofocus only requests the first item (2330); ensure no fan-out for the remaining 4 items
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await page.waitForTimeout(500);
-  expect(quoteCount).toBe(0);
-  expect(historyCount).toBe(0);
+  expect(quoteCount).toBe(1);
+  expect(historyCount).toBe(2);
 });
 
 test('D: Focus switching between watchlist items', async ({ page }) => {

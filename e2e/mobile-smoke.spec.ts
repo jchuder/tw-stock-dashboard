@@ -75,9 +75,9 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
 
   await page.goto('/');
 
-  // Header and status badge
+  // Header and top meta
   await expect(page.getByRole('heading', { name: 'Taiwan Stock Dashboard' })).toBeVisible();
-  await expect(page.getByLabel('API 連線狀態')).toBeVisible();
+  await expect(page.locator('.top-meta')).toBeVisible();
   await expect(page.getByRole('heading', { name: '台股市場焦點' })).toBeVisible();
 
   // Market overview cards readable
@@ -94,7 +94,7 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
   // Quote and chart load properly
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByTestId('stock-quote-price')).toHaveText('2410');
-  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 上漲 20 (+0.84%)');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 20 (+0.84%)');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
   await expect(page.getByTestId('recent-trading-table')).toBeVisible();
 
