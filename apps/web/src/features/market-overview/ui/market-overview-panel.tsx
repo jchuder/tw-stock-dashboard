@@ -1,23 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import type { MarketIndexSnapshot } from '@tw-stock-dashboard/contracts';
+import { formatTaipeiDate } from '../../../shared/datetime/format-taipei.js';
 import { fetchMarketOverview } from '../api/market-overview.api.js';
 
-const COLOR_UP = '#dc2626'; // 紅漲
-const COLOR_DOWN = '#16a34a'; // 綠跌
-
-function formatNumberWithCommas(value: number): string {
-  return value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 function formatIndexChange(change: number, percent: number): string {
+  const arrow = change > 0 ? '▲' : change < 0 ? '▼' : '';
   const sign = change > 0 ? '+' : '';
-  const formattedChange = `${sign}${change.toFixed(2)}`;
-  const formattedPercent = `${sign}${percent.toFixed(2)}%`;
-  return `${formattedChange} (${formattedPercent})`;
+  const body = `${sign}${change.toFixed(2)} (${sign}${percent.toFixed(2)}%)`;
+  return arrow === '' ? body : `${arrow} ${body}`;
 }
 
 function formatYiAmount(amount: number): string {
@@ -26,10 +17,10 @@ function formatYiAmount(amount: number): string {
   return `${sign}${yi.toFixed(1)} 億`;
 }
 
-function getChangeColor(value: number): string {
-  if (value > 0) return COLOR_UP;
-  if (value < 0) return COLOR_DOWN;
-  return 'inherit';
+function changeClass(value: number): string {
+  if (value > 0) return 'price-up';
+  if (value < 0) return 'price-down';
+  return 'price-neutral';
 }
 
 function IndexCard({
@@ -39,21 +30,15 @@ function IndexCard({
   title: string;
   snapshot: MarketIndexSnapshot;
 }): JSX.Element {
-  const color = getChangeColor(snapshot.change);
-
   return (
-    <div className="dashboard-card" data-testid={`market-index-${title}`}>
-      <h3 style={{ margin: '0 0 8px 0', fontSize: '1rem', color: '#64748b' }}>{title}</h3>
-      <div style={{ fontSize: '1.75rem', fontWeight: '800', marginBottom: '4px', letterSpacing: '-0.02em' }}>
-        {formatNumberWithCommas(snapshot.close)}
-      </div>
-      <div style={{ color, fontWeight: '700', marginBottom: '8px', fontSize: '1.05rem' }}>
+    <article className="dashboard-card market-card" data-testid={`market-index-${title}`}>
+      <div className="card-title">{title}</div>
+      <div className="big-number">{snapshot.close.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      <div className={`index-change ${changeClass(snapshot.change)}`}>
         {formatIndexChange(snapshot.change, snapshot.changePercent)}
       </div>
-      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-        {snapshot.asOf} 收盤
-      </div>
-    </div>
+      <div className="mini-meta">{formatTaipeiDate(snapshot.asOf)} 收盤</div>
+    </article>
   );
 }
 
@@ -79,70 +64,42 @@ export function MarketOverviewPanel(): JSX.Element {
   const { taiex, otc, institutional } = query.data;
 
   return (
-    <section aria-label="市場概況" style={{ marginBottom: '24px' }}>
+    <section aria-label="市場概況" style={{ marginBottom: '16px' }}>
       <div className="market-overview-grid">
-        <IndexCard title="加權指數" snapshot={taiex} />
-        <IndexCard title="櫃買指數" snapshot={otc} />
+        <IndexCard title="加權指數 (TAIEX)" snapshot={taiex} />
+        <IndexCard title="櫃買指數 (OTC)" snapshot={otc} />
 
-        <div className="dashboard-card" data-testid="market-institutional">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', color: '#64748b' }}>上市三大法人</h3>
-            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{institutional.asOf}</span>
-          </div>
-          <table style={{ width: '100%', fontSize: '0.95rem' }}>
-            <tbody>
-              <tr>
-                <td>外資</td>
-                <td
-                  style={{
-                    textAlign: 'right',
-                    color: getChangeColor(institutional.foreignNetAmount),
-                    fontWeight: 'bold',
-                  }}
-                >
+        <article className="dashboard-card market-card" data-testid="market-institutional">
+          <div className="card-title">三大法人最近一日買賣超</div>
+          <div className="institution-summary">
+            <div className="institution-total">
+              <div className={`big-number ${changeClass(institutional.totalNetAmount)}`}>
+                {formatYiAmount(institutional.totalNetAmount)}
+              </div>
+              <div className="mini-meta">盤後資料 · {formatTaipeiDate(institutional.asOf)}</div>
+            </div>
+            <div className="institution-lines">
+              <div className="inst-row">
+                <span>外資</span>
+                <span className={`inst-value ${changeClass(institutional.foreignNetAmount)}`}>
                   {formatYiAmount(institutional.foreignNetAmount)}
-                </td>
-              </tr>
-              <tr>
-                <td>投信</td>
-                <td
-                  style={{
-                    textAlign: 'right',
-                    color: getChangeColor(institutional.investmentTrustNetAmount),
-                    fontWeight: 'bold',
-                  }}
-                >
+                </span>
+              </div>
+              <div className="inst-row">
+                <span>投信</span>
+                <span className={`inst-value ${changeClass(institutional.investmentTrustNetAmount)}`}>
                   {formatYiAmount(institutional.investmentTrustNetAmount)}
-                </td>
-              </tr>
-              <tr>
-                <td>自營商</td>
-                <td
-                  style={{
-                    textAlign: 'right',
-                    color: getChangeColor(institutional.dealerNetAmount),
-                    fontWeight: 'bold',
-                  }}
-                >
+                </span>
+              </div>
+              <div className="inst-row">
+                <span>自營商</span>
+                <span className={`inst-value ${changeClass(institutional.dealerNetAmount)}`}>
                   {formatYiAmount(institutional.dealerNetAmount)}
-                </td>
-              </tr>
-              <tr style={{ borderTop: '1px solid #e5e7eb' }}>
-                <td style={{ paddingTop: '6px', fontWeight: 'bold' }}>合計</td>
-                <td
-                  style={{
-                    textAlign: 'right',
-                    paddingTop: '6px',
-                    color: getChangeColor(institutional.totalNetAmount),
-                    fontWeight: 'bold',
-                  }}
-                >
-                  {formatYiAmount(institutional.totalNetAmount)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                </span>
+              </div>
+            </div>
+          </div>
+        </article>
       </div>
     </section>
   );

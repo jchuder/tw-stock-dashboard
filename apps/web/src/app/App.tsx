@@ -34,7 +34,6 @@ export function App(): JSX.Element {
       <header className="dashboard-header">
         <div className="header-title-group">
           <h1>Taiwan Stock Dashboard</h1>
-          <p className="header-subtitle">台股市場資訊與個股技術分析</p>
         </div>
         <GlobalStockSearch onSearch={onSearch} />
         <div className="api-status-badge" role="status" aria-label="API 連線狀態">
@@ -42,7 +41,10 @@ export function App(): JSX.Element {
           <span>{statusText}</span>
         </div>
       </header>
-      <main>
+      <main className="dashboard-main">
+        <div className="page-heading">
+          <h1>台股市場焦點</h1>
+        </div>
         <MarketOverviewPanel />
         <StockAnalysis
           requestedSymbol={search?.symbol ?? null}
