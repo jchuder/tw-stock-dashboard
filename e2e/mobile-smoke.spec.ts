@@ -78,11 +78,13 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
   // Header and status badge
   await expect(page.getByRole('heading', { name: 'Taiwan Stock Dashboard' })).toBeVisible();
   await expect(page.getByLabel('API 連線狀態')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '台股市場焦點' })).toBeVisible();
 
   // Market overview cards readable
-  await expect(page.getByTestId('market-index-加權指數')).toBeVisible();
-  await expect(page.getByTestId('market-index-櫃買指數')).toBeVisible();
+  await expect(page.getByTestId('market-index-加權指數 (TAIEX)')).toBeVisible();
+  await expect(page.getByTestId('market-index-櫃買指數 (OTC)')).toBeVisible();
   await expect(page.getByTestId('market-institutional')).toBeVisible();
+  await expect(page.getByText('自選觀察清單')).toBeVisible();
 
   // Watchlist reachable and usable
   const watchItem = page.getByTestId('watchlist-item-2330');

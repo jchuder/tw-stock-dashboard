@@ -119,8 +119,8 @@ async function main() {
     }
 
     console.log('[Smoke] Querying stock 2330...');
-    await page.getByPlaceholder('輸入股票代號，如 2330').fill('2330');
-    await page.getByRole('button', { name: '查詢' }).click();
+    await page.getByPlaceholder('請輸入股票代號').fill('2330');
+    await page.getByRole('button', { name: '搜尋' }).click();
 
     console.log('[Smoke] Waiting for quote and chart...');
     await page.locator('text=2330 台積電').waitFor({ timeout: 15000 });

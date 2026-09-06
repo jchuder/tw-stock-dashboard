@@ -85,13 +85,14 @@ test('A & B: Add to watchlist and duplicate protection', async ({ page }) => {
   await page.goto('/');
 
   // Search 2330
-  await page.getByPlaceholder('輸入股票代號，如 2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await page.getByPlaceholder('請輸入股票代號').fill('2330');
+  await page.getByRole('button', { name: '搜尋' }).click();
 
   // Star action beside the title adds to the watchlist
   const starBtn = page.getByRole('button', { name: '加入自選' });
   await expect(starBtn).toBeVisible();
   await expect(starBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect(starBtn).toContainText('加入觀察');
   await starBtn.click();
 
   // Item appears in watchlist
@@ -102,6 +103,7 @@ test('A & B: Add to watchlist and duplicate protection', async ({ page }) => {
   // Star turns into remove action and is pressed
   const pressed = page.getByRole('button', { name: '從自選移除' });
   await expect(pressed).toHaveAttribute('aria-pressed', 'true');
+  await expect(pressed).toContainText('已在觀察');
 
   // LocalStorage check
   const storageContent = await page.evaluate(() =>
@@ -262,8 +264,8 @@ test('G: Invalid symbol cannot be added to watchlist', async ({ page }) => {
 
   await page.goto('/');
 
-  await page.getByPlaceholder('輸入股票代號，如 2330').fill('999999');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await page.getByPlaceholder('請輸入股票代號').fill('999999');
+  await page.getByRole('button', { name: '搜尋' }).click();
 
   await expect(page.getByText('查無此股票代號')).toBeVisible();
   await expect(page.getByRole('button', { name: '加入自選' })).toHaveCount(0);

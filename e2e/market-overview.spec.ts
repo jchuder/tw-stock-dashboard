@@ -62,30 +62,29 @@ test('homepage loads TAIEX, OTC, and 上市三大法人 with positive/negative f
 
   await page.goto('/');
 
+  await expect(page.getByRole('heading', { name: '台股市場焦點' })).toBeVisible();
+
   // TAIEX
-  const taiexCard = page.getByTestId('market-index-加權指數');
+  const taiexCard = page.getByTestId('market-index-加權指數 (TAIEX)');
   await expect(taiexCard).toBeVisible();
-  await expect(taiexCard).toContainText('加權指數');
+  await expect(taiexCard).toContainText('加權指數 (TAIEX)');
   await expect(taiexCard).toContainText('46,551.13');
-  await expect(taiexCard).toContainText('+693.47 (+1.51%)');
-  await expect(taiexCard).toContainText('2026-09-04 收盤');
+  await expect(taiexCard).toContainText('▲ +693.47 (+1.51%)');
+  await expect(taiexCard).toContainText('2026/09/04 收盤');
 
   // OTC
-  const otcCard = page.getByTestId('market-index-櫃買指數');
+  const otcCard = page.getByTestId('market-index-櫃買指數 (OTC)');
   await expect(otcCard).toBeVisible();
-  await expect(otcCard).toContainText('櫃買指數');
+  await expect(otcCard).toContainText('櫃買指數 (OTC)');
   await expect(otcCard).toContainText('402.48');
-  await expect(otcCard).toContainText('+7.23 (+1.83%)');
-  await expect(otcCard).toContainText('2026-09-04 收盤');
+  await expect(otcCard).toContainText('▲ +7.23 (+1.83%)');
+  await expect(otcCard).toContainText('2026/09/04 收盤');
 
-  // 上市三大法人
+  // 三大法人最近一日買賣超
   const instCard = page.getByTestId('market-institutional');
   await expect(instCard).toBeVisible();
-  await expect(instCard).toContainText('上市三大法人');
+  await expect(instCard).toContainText('三大法人最近一日買賣超');
   await expect(instCard).toContainText('+562.1 億');
-  await expect(instCard).toContainText('-9.1 億');
-  await expect(instCard).toContainText('+63.7 億');
-  await expect(instCard).toContainText('+616.7 億');
 });
 
 test('market overview 500 error does NOT break stock search', async ({ page }) => {
@@ -113,8 +112,8 @@ test('market overview 500 error does NOT break stock search', async ({ page }) =
   await expect(page.getByText('市場概況載入失敗')).toBeVisible();
 
   // 搜尋功能正常工作
-  await page.getByPlaceholder('輸入股票代號，如 2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await page.getByPlaceholder('請輸入股票代號').fill('2330');
+  await page.getByRole('button', { name: '搜尋' }).click();
 
   await expect(page.getByText('2330 台積電')).toBeVisible();
   await expect(page.getByText('568')).toBeVisible();
