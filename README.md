@@ -88,7 +88,7 @@ flowchart TB
 | 歷史 K 線（History） | 富果 Fugle MarketData API | 無（Fugle only，未配置金鑰回傳 500） | 不快取（無快取） |
 | 加權指數（TAIEX） | TWSE OpenAPI（日終盤後 EOD 數據） | 無 | 不快取 |
 | 櫃買指數（OTC） | TPEx OpenAPI（日終盤後 EOD 數據） | 無 | 不快取 |
-| 三大法人買賣超 | TWSE OpenAPI BFI82U（日終盤後 EOD 數據） | 無 | 不快取 |
+| 三大法人買賣超 | TWSE BFI82U JSON endpoint（日終盤後 EOD 數據） | 無 | 不快取 |
 
 ### 重要說明
 
