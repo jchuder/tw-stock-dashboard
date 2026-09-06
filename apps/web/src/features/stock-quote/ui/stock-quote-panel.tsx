@@ -19,13 +19,23 @@ function formatSigned(value: number, suffix = ''): string {
 export function StockQuotePanel({
   onSymbolSubmitted,
   onQuoteResolved,
+  requestedSymbol,
 }: {
   onSymbolSubmitted?: (symbol: string) => void;
-  onQuoteResolved?: (symbol: string) => void;
+  onQuoteResolved?: (stock: { symbol: string; name: string }) => void;
+  requestedSymbol?: string | null;
 }): JSX.Element {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState<string | null>(null);
   const previousProvider = useRef<'fugle' | 'twse-mis' | null>(null);
+
+  useEffect(() => {
+    if (requestedSymbol !== undefined && requestedSymbol !== null && requestedSymbol !== submitted) {
+      setInput(requestedSymbol);
+      setSubmitted(requestedSymbol);
+    }
+  }, [requestedSymbol, submitted]);
+
   const quote = useQuery({
     queryKey: ['stock-quote', submitted],
     queryFn: () => {
@@ -40,7 +50,7 @@ export function StockQuotePanel({
 
   useEffect(() => {
     if (quote.isSuccess && quote.data && submitted !== null && quote.data.symbol === submitted) {
-      onQuoteResolved?.(quote.data.symbol);
+      onQuoteResolved?.({ symbol: quote.data.symbol, name: quote.data.name });
     }
   }, [quote.isSuccess, quote.data, submitted, onQuoteResolved]);
 
@@ -102,11 +112,11 @@ export function StockQuotePanel({
         )
       )}
       {quote.isSuccess && source && (
-        <div>
-          <p>
+        <div data-testid="stock-quote-info">
+          <p data-testid="stock-quote-title">
             {quote.data.symbol} {quote.data.name}
           </p>
-          <p>{quote.data.price}</p>
+          <p data-testid="stock-quote-price">{quote.data.price}</p>
           <p>{formatSigned(quote.data.change)}</p>
           <p>{formatSigned(quote.data.changePercent, '%')}</p>
           <p>資料來源：{PROVIDER_LABELS[source.provider]}</p>
