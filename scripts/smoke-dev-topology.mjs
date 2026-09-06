@@ -4,6 +4,7 @@ import { chromium } from '@playwright/test';
 const API_PORT = 3001;
 const WEB_PORT = 5173;
 const API_URL = `http://localhost:${API_PORT}`;
+const API_HEALTH_URL = `${API_URL}/health`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 
 async function isPortOpen(url) {
@@ -49,17 +50,12 @@ process.on('SIGTERM', () => {
 async function main() {
   console.log('[Smoke] Checking dev topology servers...');
 
-  const apiAlreadyRunning = await isPortOpen(`${API_URL}/api/v1/market/overview`);
+  const apiAlreadyRunning = await isPortOpen(API_HEALTH_URL);
   if (!apiAlreadyRunning) {
-    console.log('[Smoke] Starting Nest API server...');
-    const apiProc = spawn(
-      'node',
-      ['--env-file-if-exists=.env.local', 'dist/main.js'],
-      {
-        cwd: 'apps/api',
-        stdio: 'pipe',
-      },
-    );
+    console.log('[Smoke] Starting Nest API server with pnpm dev:api...');
+    const apiProc = spawn('pnpm', ['dev:api'], {
+      stdio: 'pipe',
+    });
     spawnedProcesses.push(apiProc);
   }
 
@@ -72,7 +68,7 @@ async function main() {
     spawnedProcesses.push(webProc);
   }
 
-  const apiReady = await waitForServer(`${API_URL}/api/v1/market/overview`, 30000);
+  const apiReady = await waitForServer(API_HEALTH_URL, 30000);
   if (!apiReady) {
     throw new Error(`API server failed to start on ${API_URL}`);
   }
