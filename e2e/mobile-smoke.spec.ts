@@ -21,6 +21,13 @@ const QUOTE_2330 = {
   previousClose: 2390,
   change: 20,
   changePercent: 0.84,
+  tradeDate: '2026-09-04',
+  openPrice: 2395,
+  highPrice: 2415,
+  lowPrice: 2390,
+  tradeVolume: 22334455,
+  limitUpPrice: 2629,
+  limitDownPrice: 2151,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
@@ -33,7 +40,8 @@ const QUOTE_2330 = {
 const CANDLES_2330 = {
   symbol: '2330',
   market: 'TWSE',
-  range: '1m',
+  range: '1d',
+  timeframe: '5m',
   candles: [
     { date: '2026-08-05', open: 2300, high: 2320, low: 2280, close: 2310, volume: 28765432, ma5: null, ma10: null, ma20: null, ma60: null },
     { date: '2026-08-06', open: 2310, high: 2330, low: 2300, close: 2320, volume: 30123456, ma5: 2315, ma10: null, ma20: null, ma60: null },
@@ -82,5 +90,22 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
   // Quote and chart load properly
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByTestId('stock-quote-price')).toHaveText('2410');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 上漲 20 (+0.84%)');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
+  await expect(page.getByTestId('recent-trading-table')).toBeVisible();
+
+  // Mobile order: focus quote, chart, table, then watchlist.
+  const order = await page.evaluate(() => {
+    const quote = document.querySelector('[data-testid="stock-quote-info"]');
+    const chart = document.querySelector('[data-testid="stock-history-chart"]');
+    const table = document.querySelector('[data-testid="recent-trading-table"]');
+    const watchlist = document.querySelector('[aria-label="自選股清單"]');
+    if (!quote || !chart || !table || !watchlist) return 'missing';
+    const following = (a: Element, b: Element): boolean =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    return following(quote, chart) && following(chart, table) && following(table, watchlist)
+      ? 'ordered'
+      : 'unordered';
+  });
+  expect(order).toBe('ordered');
 });

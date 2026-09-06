@@ -119,7 +119,7 @@ async function main() {
     }
 
     console.log('[Smoke] Querying stock 2330...');
-    await page.getByPlaceholder('2330').fill('2330');
+    await page.getByPlaceholder('輸入股票代號，如 2330').fill('2330');
     await page.getByRole('button', { name: '查詢' }).click();
 
     console.log('[Smoke] Waiting for quote and chart...');

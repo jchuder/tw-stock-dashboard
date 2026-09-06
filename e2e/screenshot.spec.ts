@@ -21,6 +21,13 @@ const QUOTE_2330 = {
   previousClose: 2390,
   change: 20,
   changePercent: 0.84,
+  tradeDate: '2026-09-04',
+  openPrice: 2400,
+  highPrice: 2420,
+  lowPrice: 2390,
+  tradeVolume: 38500000,
+  limitUpPrice: 2629,
+  limitDownPrice: 2151,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
@@ -35,6 +42,7 @@ const CANDLES_2330 = {
   symbol: '2330',
   market: 'TWSE',
   range: '1m',
+  timeframe: '1d',
   candles: [
     { date: '2026-08-05', open: 2280, high: 2310, low: 2270, close: 2300, volume: 24500000, ma5: null, ma10: null, ma20: null, ma60: null },
     { date: '2026-08-06', open: 2305, high: 2325, low: 2295, close: 2315, volume: 26800000, ma5: null, ma10: null, ma20: null, ma60: null },
@@ -83,7 +91,13 @@ test('capture dashboard screenshot for documentation', async ({ page }) => {
   });
   await page.route('**/api/v1/stocks/2330/history*', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CANDLES_2330) });
+    const range = new URL(route.request().url()).searchParams.get('range') ?? '1d';
+    const intraday = range === '1d' || range === '3d' || range === '5d';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...CANDLES_2330, range, timeframe: intraday ? '5m' : '1d' }),
+    });
   });
 
   await page.addInitScript((items) => {
@@ -100,7 +114,12 @@ test('capture dashboard screenshot for documentation', async ({ page }) => {
   // Wait for quote, chart, and recent table to settle
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByTestId('stock-quote-price')).toHaveText('2410');
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 上漲 20 (+0.84%)');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
+
+  // Docs screenshot shows the daily view with full MA context.
+  await page.getByRole('button', { name: '1M', exact: true }).click();
+  await expect(page.getByText('日 K')).toBeVisible();
 
   // Wait 500ms for lightweight-charts rendering canvas to complete animation/layout
   await page.waitForTimeout(500);

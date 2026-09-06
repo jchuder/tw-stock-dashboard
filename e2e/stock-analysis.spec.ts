@@ -1,6 +1,16 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+const ENRICHED_QUOTE = {
+  tradeDate: '2026-09-04',
+  openPrice: 560,
+  highPrice: 570,
+  lowPrice: 559,
+  tradeVolume: 12345678,
+  limitUpPrice: 622,
+  limitDownPrice: 510,
+};
+
 const QUOTE_BODY = {
   symbol: '2330',
   name: '台積電',
@@ -9,25 +19,34 @@ const QUOTE_BODY = {
   previousClose: 566,
   change: 2,
   changePercent: 0.35,
+  ...ENRICHED_QUOTE,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
-    fetchedAt: '2026-09-05T04:40:00.000Z',
-    asOf: null,
+    fetchedAt: '2026-09-06T03:45:06.000Z',
+    asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
   },
 };
+
+const INTRADAY_RANGES = new Set(['1d', '3d', '5d']);
 
 function historyBody(range: string, price: number) {
   return {
     symbol: '2330',
     market: 'TWSE',
     range,
+    timeframe: INTRADAY_RANGES.has(range) ? '5m' : '1d',
     candles: [
       { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, volume: 1000, ma5: null, ma10: null, ma20: null, ma60: null },
       { date: '2026-08-06', open: 555, high: 566, low: 545, close: price, volume: 2000, ma5: 555, ma10: null, ma20: null, ma60: null },
     ],
   };
+}
+
+async function search(page: Page, symbol: string) {
+  await page.getByPlaceholder('輸入股票代號，如 2330').fill(symbol);
+  await page.getByRole('button', { name: '查詢' }).click();
 }
 
 async function setupAnalysis(page: Page) {
@@ -44,91 +63,96 @@ async function setupAnalysis(page: Page) {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     const range = new URL(route.request().url()).searchParams.get('range') ?? '1m';
     historyRanges.push(range);
-    const price = range === '1m' ? 568 : range === '3m' ? 560 : 550;
+    const prices: Record<string, number> = { '1d': 568, '3d': 562, '5d': 561, '1m': 568, '3m': 560, '6m': 550, '1y': 540 };
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(historyBody(range, price)),
+      body: JSON.stringify(historyBody(range, prices[range] ?? 568)),
     });
   });
   return historyRanges;
 }
 
-test('search loads chart, MA toggles, and recent table', async ({ page }) => {
+test('search loads focus quote, intraday chart, MA legend defaults, and daily table', async ({ page }) => {
   const historyRanges = await setupAnalysis(page);
 
   await page.goto('/');
-  await page.getByPlaceholder('2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '2330');
 
   await expect(page.getByText('2330 台積電')).toBeVisible();
+  // Interview requirement, explicit wording — never a bare signed number.
+  await expect(page.getByTestId('stock-quote-change')).toHaveText('較前一交易日 上漲 2 (+0.35%)');
+  await expect(page.getByTestId('stock-quote-market')).toHaveText('上市');
+  await expect(page.getByTestId('focus-quote-grid')).toContainText('開盤');
+  await expect(page.getByTestId('focus-quote-grid')).toContainText('漲停價');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
   await expect(page.getByText('TradingView Lightweight Charts™')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'MA5' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'MA5' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'MA10' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'MA10' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'MA20' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'MA60' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'MA60' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('開盤')).toBeVisible();
+  // Default range is 當日 (1d, 5m timeframe).
+  await expect(page.getByRole('button', { name: '當日' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('5 分鐘 K')).toBeVisible();
+  // MA legend defaults: only MA5 on.
+  await expect(page.getByRole('button', { name: /MA5/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /MA10/ })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: /MA20/ })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: /MA60/ })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByText('MA 依目前 K 線週期計算')).toBeVisible();
+  // Recent daily table still shows daily OHLCV on an intraday chart range.
+  await expect(page.getByTestId('recent-trading-table')).toBeVisible();
   await expect(page.getByText('2026-08-06')).toBeVisible();
+  expect(historyRanges).toContain('1d');
   expect(historyRanges).toContain('1m');
 });
 
-test('MA toggles switch aria-pressed without refetching and persist across range switch', async ({ page }) => {
+test('MA legend toggles aria-pressed without refetching and persists across range switch', async ({ page }) => {
   const historyRanges = await setupAnalysis(page);
 
   await page.goto('/');
-  await page.getByPlaceholder('2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '2330');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
 
   const initialRequests = historyRanges.length;
 
-  // Toggle MA20 off
-  await page.getByRole('button', { name: 'MA20' }).click();
-  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'false');
+  // Toggle MA5 off (default on)
+  await page.getByRole('button', { name: /MA5/ }).click();
+  await expect(page.getByRole('button', { name: /MA5/ })).toHaveAttribute('aria-pressed', 'false');
   expect(historyRanges.length).toBe(initialRequests);
 
-  // Toggle MA20 back on
-  await page.getByRole('button', { name: 'MA20' }).click();
-  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'true');
+  // Toggle MA10 on (default off)
+  await page.getByRole('button', { name: /MA10/ }).click();
+  await expect(page.getByRole('button', { name: /MA10/ })).toHaveAttribute('aria-pressed', 'true');
   expect(historyRanges.length).toBe(initialRequests);
 
-  // Toggle MA20 off again
-  await page.getByRole('button', { name: 'MA20' }).click();
-  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'false');
-
-  // Switch to 3M range
-  await page.getByRole('button', { name: '3M' }).click();
-  await expect(page.getByRole('button', { name: '3M' })).toHaveAttribute('aria-pressed', 'true');
+  // Switch to 1M range
+  await page.getByRole('button', { name: '1M' }).click();
+  await expect(page.getByRole('button', { name: '1M' })).toHaveAttribute('aria-pressed', 'true');
   expect(historyRanges.length).toBe(initialRequests + 1);
-  expect(historyRanges[historyRanges.length - 1]).toBe('3m');
+  expect(historyRanges[historyRanges.length - 1]).toBe('1m');
 
-  // MA20 must preserve its toggled-off state
-  await expect(page.getByRole('button', { name: 'MA20' })).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.getByRole('button', { name: 'MA5' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'MA10' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'MA60' })).toHaveAttribute('aria-pressed', 'true');
+  // Legend state preserved
+  await expect(page.getByRole('button', { name: /MA5/ })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: /MA10/ })).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('range buttons refetch with 3m and 6m', async ({ page }) => {
-  await setupAnalysis(page);
+test('all seven ranges refetch with the right range param', async ({ page }) => {
+  const historyRanges = await setupAnalysis(page);
 
   await page.goto('/');
-  await page.getByPlaceholder('2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '2330');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
 
-  await page.getByRole('button', { name: '3M' }).click();
-  await expect(page.getByRole('button', { name: '3M' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('560')).toBeVisible();
-
-  await page.getByRole('button', { name: '6M' }).click();
-  await expect(page.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('550')).toBeVisible();
+  for (const [label, value] of [
+    ['3D', '3d'],
+    ['5D', '5d'],
+    ['1M', '1m'],
+    ['3M', '3m'],
+    ['6M', '6m'],
+    ['1Y', '1y'],
+  ] as const) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await expect(page.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(historyRanges[historyRanges.length - 1]).toBe(value);
+  }
+  await expect(page.getByText('日 K')).toBeVisible();
 });
 
 test('history failure does not take down the quote', async ({ page }) => {
@@ -146,8 +170,7 @@ test('history failure does not take down the quote', async ({ page }) => {
   });
 
   await page.goto('/');
-  await page.getByPlaceholder('2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '2330');
 
   await expect(page.getByText('2330 台積電')).toBeVisible();
   await expect(page.getByText('歷史資料載入失敗，請稍後再試')).toBeVisible();
@@ -170,8 +193,7 @@ test('invalid symbol displays 查無此股票代號 without requesting history a
   });
 
   await page.goto('/');
-  await page.getByPlaceholder('2330').fill('999999');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '999999');
 
   await expect(page.getByText('查無此股票代號')).toBeVisible();
   await expect(page.getByTestId('stock-history-chart')).not.toBeVisible();
@@ -195,8 +217,7 @@ test('quote upstream 500 displays 查詢失敗，請稍後再試 without request
   });
 
   await page.goto('/');
-  await page.getByPlaceholder('2330').fill('999999');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '999999');
 
   await expect(page.getByText('查詢失敗，請稍後再試')).toBeVisible();
   await expect(page.getByTestId('stock-history-chart')).not.toBeVisible();
@@ -218,7 +239,7 @@ test('switching from valid stock to invalid stock removes old chart and displays
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(historyBody('1m', 568)),
+      body: JSON.stringify(historyBody('1d', 568)),
     });
   });
   await page.route('**/api/v1/stocks/999999/quote', (route) => {
@@ -236,18 +257,15 @@ test('switching from valid stock to invalid stock removes old chart and displays
   });
 
   await page.goto('/');
-  await page.getByPlaceholder('2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '2330');
 
   await expect(page.getByText('2330 台積電')).toBeVisible();
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
 
   // Switch to invalid symbol
-  await page.getByPlaceholder('2330').fill('999999');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await search(page, '999999');
 
   await expect(page.getByText('查無此股票代號')).toBeVisible();
   await expect(page.getByTestId('stock-history-chart')).not.toBeVisible();
   expect(invalidHistoryCalls.length).toBe(0);
 });
-

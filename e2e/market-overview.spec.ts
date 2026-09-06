@@ -31,11 +31,18 @@ const QUOTE_BODY = {
   previousClose: 566,
   change: 2,
   changePercent: 0.35,
+  tradeDate: '2026-09-04',
+  openPrice: 560,
+  highPrice: 570,
+  lowPrice: 559,
+  tradeVolume: 12345678,
+  limitUpPrice: 622,
+  limitDownPrice: 510,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
-    fetchedAt: '2026-09-05T04:40:00.000Z',
-    asOf: null,
+    fetchedAt: '2026-09-06T03:45:06.000Z',
+    asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
   },
 };
@@ -105,7 +112,7 @@ test('market overview 500 error does NOT break stock search', async ({ page }) =
   await expect(page.getByText('市場概況載入失敗')).toBeVisible();
 
   // 搜尋功能正常工作
-  await page.getByPlaceholder('2330').fill('2330');
+  await page.getByPlaceholder('輸入股票代號，如 2330').fill('2330');
   await page.getByRole('button', { name: '查詢' }).click();
 
   await expect(page.getByText('2330 台積電')).toBeVisible();
