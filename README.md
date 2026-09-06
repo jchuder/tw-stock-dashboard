@@ -7,10 +7,10 @@ A production-minded Taiwan stock dashboard demo built with NestJS, Effect and Re
 ## 功能特色
 
 1. 市場概況（Market Overview）：呈現最近交易日加權指數（TAIEX）與櫃買指數（OTC）收盤資訊，以及上市三大法人（外資、投信、自營商）合計買賣超金額。
-2. 個股報價（Stock Quote）：提供上市櫃個股現價、昨收價、漲跌幅、資料來源與報價時間戳記，配置 5 秒 in-memory TTL 快取。
-3. 技術線圖與均線（Stock History & Indicators）：提供 1 個月、3 個月、6 個月 K 線圖，支援 MA5、MA10、MA20、MA60 均線即時開關切換與成交量直方圖。
+2. 個股報價（Stock Quote）：以明確文字呈現相較前一交易日的漲跌（上漲紅/下跌綠/持平），含昨收價、上市櫃 badge、交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）、資料來源與報價時間戳記，配置 5 秒 in-memory TTL 快取。
+3. 技術線圖與均線（Stock History & Indicators）：支援當日/3D/5D（5 分鐘 K）與 1M/3M/6M/1Y（日 K），預設當日；MA5/MA10/MA20/MA60 以可點選圖例切換（預設僅 MA5 顯示，MA 依目前 K 線週期計算）與成交量直方圖（5 分 K 以張、日 K 以股計）。
 4. 本機自選股（Local-First Watchlist）：免登入即可將關注個股加入自選清單，資料持久化於瀏覽器 LocalStorage，支援一鍵點擊切換分析與移除。
-5. 狀態監控與響應設計（Health & Responsive UI）：頂部顯示 API 即時連線狀態燈號；版面支援桌面雙欄佈局（Sidebar 與主分析區）與行動裝置單欄流暢佈局。
+5. 狀態監控與響應設計（Health & Responsive UI）：頂部顯示 API 即時連線狀態燈號，中央為全域股票搜尋；版面採左側焦點分析欄（報價/線圖/近期交易資料）加右側自選股欄，行動裝置依序堆疊。
 
 ## 系統架構拓撲
 
@@ -84,7 +84,7 @@ flowchart TB
 
 | 功能項目 | 資料來源 | 降級備援機制 | 快取策略 |
 | :--- | :--- | :--- | :--- |
-| 個股報價（Quote） | 富果 Fugle MarketData API | TWSE MIS（限 transient/eligible 異常） | 5 秒 in-memory TTL 快取 |
+| 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（盤中行情與漲跌停 ground truth） | TWSE MIS（限 transient/eligible 異常，取 o/h/l/v/u/w/z/y 盤中快照） | 5 秒 in-memory TTL 快取 |
 | 歷史 K 線（History） | 富果 Fugle MarketData API | 無（Fugle only，未配置金鑰回傳 500） | 不快取（無快取） |
 | 加權指數（TAIEX） | TWSE OpenAPI（日終盤後 EOD 數據） | 無 | 不快取 |
 | 櫃買指數（OTC） | TPEx OpenAPI（日終盤後 EOD 數據） | 無 | 不快取 |
