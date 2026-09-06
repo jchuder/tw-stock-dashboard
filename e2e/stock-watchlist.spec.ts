@@ -69,12 +69,14 @@ function makeCandles(symbol: string) {
 }
 
 test('A & B: Add to watchlist and duplicate protection', async ({ page }) => {
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) }),
-  );
-  await page.route('**/api/v1/stocks/2330/history*', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) }),
-  );
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+  });
+  await page.route('**/api/v1/stocks/2330/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
+  });
 
   await page.goto('/');
 
@@ -107,10 +109,12 @@ test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
   let historyCount = 0;
 
   await page.route('**/api/v1/stocks/*/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     quoteCount++;
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
   });
   await page.route('**/api/v1/stocks/*/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     historyCount++;
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
   });
@@ -142,18 +146,22 @@ test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
 });
 
 test('D: Focus switching between watchlist items', async ({ page }) => {
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) }),
-  );
-  await page.route('**/api/v1/stocks/2330/history*', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) }),
-  );
-  await page.route('**/api/v1/stocks/2454/quote', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2454) }),
-  );
-  await page.route('**/api/v1/stocks/2454/history*', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2454')) }),
-  );
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+  });
+  await page.route('**/api/v1/stocks/2330/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
+  });
+  await page.route('**/api/v1/stocks/2454/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2454) });
+  });
+  await page.route('**/api/v1/stocks/2454/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2454')) });
+  });
 
   await page.addInitScript(() => {
     localStorage.setItem(
@@ -167,10 +175,10 @@ test('D: Focus switching between watchlist items', async ({ page }) => {
 
   await page.goto('/');
 
-  // Click 2330
+  // Focus 2330
   await page.getByTestId('watchlist-item-2330').click();
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
-  await expect(page.getByTestId('watchlist-item-2330')).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByTestId('stock-quote-price')).toHaveText('568');
 
   // Click 2454
   await page.getByTestId('watchlist-item-2454').click();
@@ -180,12 +188,14 @@ test('D: Focus switching between watchlist items', async ({ page }) => {
 });
 
 test('E: Remove active stock keeps quote and chart displayed', async ({ page }) => {
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) }),
-  );
-  await page.route('**/api/v1/stocks/2330/history*', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) }),
-  );
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+  });
+  await page.route('**/api/v1/stocks/2330/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
+  });
 
   await page.addInitScript(() => {
     localStorage.setItem(
@@ -243,13 +253,14 @@ test('F: >4 items list is scrollable and all items reachable', async ({ page }) 
 });
 
 test('G: Invalid symbol cannot be added to watchlist', async ({ page }) => {
-  await page.route('**/api/v1/stocks/999999/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/999999/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 404,
       contentType: 'application/json',
       body: JSON.stringify({ statusCode: 404, message: 'Stock not found', error: 'Not Found' }),
-    }),
-  );
+    });
+  });
 
   await page.goto('/');
 

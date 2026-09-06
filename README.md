@@ -115,11 +115,14 @@ pnpm install
 
 ### 開發伺服器啟動
 
-API 服務未內建 dotenv 自動載入套件，請透過 shell export 設定金鑰後啟動。開啟兩個終端機視窗分別執行後端與前端：
+API 服務支援 Node 24 原生 `--env-file-if-exists=.env.local` 載入機制。複製範本檔案建立本機環境變數配置，填入金鑰後啟動（亦可透過 shell export 設定，外部環境變數優先權高於 `.env.local`）：
 
 ```bash
-# 終端機 1：設定金鑰並啟動後端 API 伺服器 (http://localhost:3001)
-export FUGLE_API_KEY="<your-fugle-api-key>"
+# 建立後端本機環境變數檔案
+cp .env.example apps/api/.env.local
+# 編輯 apps/api/.env.local 填入 FUGLE_API_KEY
+
+# 終端機 1：啟動後端 API 伺服器 (http://localhost:3001)
 pnpm dev:api
 
 # 終端機 2：啟動前端 Web 應用程式 (http://localhost:5173)
@@ -139,6 +142,7 @@ pnpm dev:web
 | `pnpm typecheck` | 嚴格型別檢查（包含 contracts, api 與 web） |
 | `pnpm test` | 執行單元測試與整合測試（Vitest） |
 | `pnpm test:e2e` | 執行 Playwright 端到端驗證測試集 |
+| `pnpm smoke:dev-topology` | 執行前後端真實拓撲（5173 呼叫 3001）即時煙霧測試（選填，需配置 API Key） |
 | `pnpm verify:boundaries` | 驗證模組架構邊界防護規則 |
 
 ## 可觀測性（Observability，選填）

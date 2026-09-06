@@ -43,15 +43,18 @@ const CANDLES_2330 = {
 test.use({ viewport: { width: 390, height: 844 } });
 
 test('mobile viewport smoke: usable search, market overview, watchlist, and chart', async ({ page }) => {
-  await page.route('**/api/v1/market/overview', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_MARKET_OVERVIEW) }),
-  );
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) }),
-  );
-  await page.route('**/api/v1/stocks/2330/history*', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CANDLES_2330) }),
-  );
+  await page.route('**/api/v1/market/overview', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_MARKET_OVERVIEW) });
+  });
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+  });
+  await page.route('**/api/v1/stocks/2330/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CANDLES_2330) });
+  });
 
   await page.addInitScript(() => {
     localStorage.setItem(

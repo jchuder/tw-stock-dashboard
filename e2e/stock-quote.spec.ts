@@ -38,13 +38,14 @@ const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換�
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
 
 test('stock quote happy path', async ({ page }) => {
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(FUGLE_BODY),
-    }),
-  );
+    });
+  });
 
   await page.goto('/');
   await page.getByPlaceholder('2330').fill('2330');
@@ -62,6 +63,7 @@ test('source fallback and recovery toasts', async ({ page }) => {
   const script = [FUGLE_BODY, MIS_BODY, { ...MIS_BODY, source: { ...MIS_BODY.source, cacheHit: true } }, FUGLE_BODY];
   let calls = 0;
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     const body = script[Math.min(calls, script.length - 1)];
     calls += 1;
     return route.fulfill({

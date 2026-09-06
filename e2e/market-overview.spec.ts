@@ -43,13 +43,14 @@ const QUOTE_BODY = {
 test('homepage loads TAIEX, OTC, and 上市三大法人 with positive/negative formatting', async ({
   page,
 }) => {
-  await page.route('**/api/v1/market/overview', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/market/overview', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(MOCK_MARKET_OVERVIEW),
-    }),
-  );
+    });
+  });
 
   await page.goto('/');
 
@@ -80,21 +81,23 @@ test('homepage loads TAIEX, OTC, and 上市三大法人 with positive/negative f
 });
 
 test('market overview 500 error does NOT break stock search', async ({ page }) => {
-  await page.route('**/api/v1/market/overview', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/market/overview', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 500,
       contentType: 'application/json',
       body: JSON.stringify({ statusCode: 500, message: 'Failed to fetch market overview' }),
-    }),
-  );
+    });
+  });
 
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(QUOTE_BODY),
-    }),
-  );
+    });
+  });
 
   await page.goto('/');
 

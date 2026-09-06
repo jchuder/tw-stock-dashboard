@@ -32,14 +32,16 @@ function historyBody(range: string, price: number) {
 
 async function setupAnalysis(page: Page) {
   const historyRanges: string[] = [];
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(QUOTE_BODY),
-    }),
-  );
+    });
+  });
   await page.route('**/api/v1/stocks/2330/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     const range = new URL(route.request().url()).searchParams.get('range') ?? '1m';
     historyRanges.push(range);
     const price = range === '1m' ? 568 : range === '3m' ? 560 : 550;
@@ -130,16 +132,18 @@ test('range buttons refetch with 3m and 6m', async ({ page }) => {
 });
 
 test('history failure does not take down the quote', async ({ page }) => {
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(QUOTE_BODY),
-    }),
-  );
-  await page.route('**/api/v1/stocks/2330/history*', (route) =>
-    route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
-  );
+    });
+  });
+  await page.route('**/api/v1/stocks/2330/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+  });
 
   await page.goto('/');
   await page.getByPlaceholder('2330').fill('2330');
@@ -151,14 +155,16 @@ test('history failure does not take down the quote', async ({ page }) => {
 
 test('invalid symbol displays 查無此股票代號 without requesting history and without chart', async ({ page }) => {
   const historyCalls: string[] = [];
-  await page.route('**/api/v1/stocks/999999/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/999999/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 404,
       contentType: 'application/json',
       body: JSON.stringify({ statusCode: 404, message: 'Stock not found', error: 'Not Found' }),
-    }),
-  );
+    });
+  });
   await page.route('**/api/v1/stocks/**/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     historyCalls.push(route.request().url());
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
@@ -174,14 +180,16 @@ test('invalid symbol displays 查無此股票代號 without requesting history a
 
 test('quote upstream 500 displays 查詢失敗，請稍後再試 without requesting history', async ({ page }) => {
   const historyCalls: string[] = [];
-  await page.route('**/api/v1/stocks/999999/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/999999/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 500,
       contentType: 'application/json',
       body: JSON.stringify({ statusCode: 500, message: 'Internal Server Error' }),
-    }),
-  );
+    });
+  });
   await page.route('**/api/v1/stocks/**/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     historyCalls.push(route.request().url());
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
@@ -197,28 +205,32 @@ test('quote upstream 500 displays 查詢失敗，請稍後再試 without request
 
 test('switching from valid stock to invalid stock removes old chart and displays 404', async ({ page }) => {
   const invalidHistoryCalls: string[] = [];
-  await page.route('**/api/v1/stocks/2330/quote', (route) =>
-    route.fulfill({
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(QUOTE_BODY),
-    }),
-  );
-  await page.route('**/api/v1/stocks/2330/history*', (route) =>
-    route.fulfill({
+    });
+  });
+  await page.route('**/api/v1/stocks/2330/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(historyBody('1m', 568)),
-    }),
-  );
-  await page.route('**/api/v1/stocks/999999/quote', (route) =>
-    route.fulfill({
+    });
+  });
+  await page.route('**/api/v1/stocks/999999/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
       status: 404,
       contentType: 'application/json',
       body: JSON.stringify({ statusCode: 404, message: 'Stock not found', error: 'Not Found' }),
-    }),
-  );
+    });
+  });
   await page.route('**/api/v1/stocks/999999/history*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     invalidHistoryCalls.push(route.request().url());
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
