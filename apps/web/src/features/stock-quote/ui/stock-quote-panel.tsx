@@ -7,11 +7,6 @@ import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.
 const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
 
-const PROVIDER_LABELS = {
-  fugle: 'Fugle API Connected',
-  'twse-mis': 'TWSE MIS',
-} as const;
-
 const MARKET_LABELS = {
   TWSE: '上市',
   TPEX: '上櫃',
@@ -20,6 +15,12 @@ const MARKET_LABELS = {
 const COLOR_UP = '#d94b45';
 const COLOR_DOWN = '#169a52';
 const COLOR_FLAT = '#59605c';
+
+function changeClass(value: number): string {
+  if (value > 0) return 'price-up';
+  if (value < 0) return 'price-down';
+  return 'price-neutral';
+}
 
 function formatSigned(value: number, suffix = ''): string {
   return `${value >= 0 ? '+' : ''}${value}${suffix}`;
@@ -152,6 +153,7 @@ export function StockQuotePanel({
           >
             <span
               data-testid="stock-quote-price"
+              className={changeClass(quote.data.change)}
               style={{ fontSize: '2rem', fontWeight: '800', letterSpacing: '-0.02em' }}
             >
               {quote.data.price}
@@ -160,6 +162,19 @@ export function StockQuotePanel({
               change={quote.data.change}
               changePercent={quote.data.changePercent}
             />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '13px',
+              color: 'var(--text-muted)',
+              marginBottom: '4px',
+            }}
+          >
+            <span>前一交易日收盤 {quote.data.previousClose}</span>
+            {source.cacheHit && <span className="badge-cache">快取</span>}
           </div>
           <div data-testid="focus-quote-grid" className="focus-quote-grid">
             <QuoteCell label="開盤價" value={formatNullable(quote.data.openPrice)} compare={quote.data.openPrice} previousClose={quote.data.previousClose} />
@@ -171,12 +186,6 @@ export function StockQuotePanel({
             />
             <QuoteCell label="漲停價" value={formatNullable(quote.data.limitUpPrice)} tone="up" />
             <QuoteCell label="跌停價" value={formatNullable(quote.data.limitDownPrice)} tone="down" />
-          </div>
-          <div className="quote-meta-row">
-            <span>交易日行情{quote.data.tradeDate !== null ? ` ${quote.data.tradeDate}` : ''}</span>
-            <span>昨收 {quote.data.previousClose}</span>
-            <span>資料來源：{PROVIDER_LABELS[source.provider]}</span>
-            {source.cacheHit && <span className="badge-cache">快取</span>}
           </div>
         </div>
       )}

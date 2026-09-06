@@ -33,7 +33,9 @@ function IndexCard({
   return (
     <article className="dashboard-card market-card" data-testid={`market-index-${title}`}>
       <div className="card-title">{title}</div>
-      <div className="big-number">{snapshot.close.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      <div className={`big-number ${changeClass(snapshot.change)}`}>
+        {snapshot.close.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      </div>
       <div className={`index-change ${changeClass(snapshot.change)}`}>
         {formatIndexChange(snapshot.change, snapshot.changePercent)}
       </div>

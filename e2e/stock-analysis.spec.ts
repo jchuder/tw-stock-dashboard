@@ -196,7 +196,7 @@ test('invalid symbol displays 查無此股票代號 without requesting history a
       body: JSON.stringify({ statusCode: 404, message: 'Stock not found', error: 'Not Found' }),
     });
   });
-  await page.route('**/api/v1/stocks/**/history*', (route) => {
+  await page.route('**/api/v1/stocks/999999/history*', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     historyCalls.push(route.request().url());
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
@@ -220,7 +220,7 @@ test('quote upstream 500 displays 查詢失敗，請稍後再試 without request
       body: JSON.stringify({ statusCode: 500, message: 'Internal Server Error' }),
     });
   });
-  await page.route('**/api/v1/stocks/**/history*', (route) => {
+  await page.route('**/api/v1/stocks/999999/history*', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     historyCalls.push(route.request().url());
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });

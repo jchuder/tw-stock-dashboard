@@ -69,6 +69,7 @@ test('homepage loads TAIEX, OTC, and 上市三大法人 with positive/negative f
   await expect(taiexCard).toBeVisible();
   await expect(taiexCard).toContainText('加權指數 (TAIEX)');
   await expect(taiexCard).toContainText('46,551.13');
+  await expect(taiexCard.locator('.big-number')).toHaveClass(/price-up/);
   await expect(taiexCard).toContainText('▲ +693.47 (+1.51%)');
   await expect(taiexCard).toContainText('2026/09/04 收盤');
 
@@ -77,6 +78,7 @@ test('homepage loads TAIEX, OTC, and 上市三大法人 with positive/negative f
   await expect(otcCard).toBeVisible();
   await expect(otcCard).toContainText('櫃買指數 (OTC)');
   await expect(otcCard).toContainText('402.48');
+  await expect(otcCard.locator('.big-number')).toHaveClass(/price-up/);
   await expect(otcCard).toContainText('▲ +7.23 (+1.83%)');
   await expect(otcCard).toContainText('2026/09/04 收盤');
 
