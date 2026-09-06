@@ -31,6 +31,13 @@ const EXPECTED_QUOTE = {
   previousClose: 566,
   change: 2,
   changePercent: 0.35,
+  tradeDate: null,
+  openPrice: null,
+  highPrice: null,
+  lowPrice: null,
+  tradeVolume: null,
+  limitUpPrice: null,
+  limitDownPrice: null,
 };
 
 type QuoteResult = Either.Either<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError | StockNotFoundError>;
@@ -132,7 +139,7 @@ describe('StockQuoteService TTL cache', () => {
     vi.unstubAllEnvs();
   });
 
-  it('serves the second request from cache within TTL with one upstream call', async () => {
+  it('serves the second request from cache within TTL with one upstream round', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(FUGLE_BODY), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -150,7 +157,8 @@ describe('StockQuoteService TTL cache', () => {
     const fugleSource = { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null } as const;
     expectRightQuote(first, EXPECTED_QUOTE, fugleSource);
     expectRightQuote(second, EXPECTED_QUOTE, { ...fugleSource, cacheHit: true });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // One upstream round is two Fugle calls: intraday quote + ticker.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('refetches once TTL expires at exactly 5s', async () => {
@@ -171,7 +179,7 @@ describe('StockQuoteService TTL cache', () => {
     const fugleSource = { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null } as const;
     expectRightQuote(first, EXPECTED_QUOTE, fugleSource);
     expectRightQuote(second, EXPECTED_QUOTE, fugleSource);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('isolates cache entries per symbol', async () => {
@@ -198,22 +206,21 @@ describe('StockQuoteService TTL cache', () => {
     expectRightQuote(first, EXPECTED_QUOTE, fugleSource);
     expectRightQuote(second, { ...EXPECTED_QUOTE, symbol: '2454' }, fugleSource);
     expectRightQuote(third, EXPECTED_QUOTE, { ...fugleSource, cacheHit: true });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
-
   it('does not cache failures: a 401 then retries upstream', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    let calls = 0;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: unknown) => {
-        calls += 1;
-        if (String(input).includes('api.fugle.tw') && calls === 1) {
+    let quoteCalls = 0;
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('intraday/quote')) {
+        quoteCalls += 1;
+        if (quoteCalls === 1) {
           return new Response(JSON.stringify({ message: 'unauthorized' }), { status: 401 });
         }
-        return new Response(JSON.stringify(FUGLE_BODY), { status: 200 });
-      }),
-    );
+      }
+      return new Response(JSON.stringify(FUGLE_BODY), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
     const svc = service();
 
     const [first, second] = await Effect.runPromise(
@@ -232,7 +239,8 @@ describe('StockQuoteService TTL cache', () => {
       cacheHit: false,
       asOf: null,
     });
-    expect(calls).toBe(2);
+    expect(quoteCalls).toBe(2);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
   it('caches MIS fallback success without hitting either provider again', async () => {
@@ -258,7 +266,7 @@ describe('StockQuoteService TTL cache', () => {
     const misSource = { provider: 'twse-mis', fallbackUsed: true, cacheHit: false, asOf: null } as const;
     expectRightQuote(first, EXPECTED_QUOTE, misSource);
     expectRightQuote(second, EXPECTED_QUOTE, { ...misSource, cacheHit: true });
-    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(2);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
 
@@ -289,15 +297,75 @@ describe('StockQuoteService TTL cache', () => {
     const misSource = { provider: 'twse-mis', fallbackUsed: true, cacheHit: false, asOf: null } as const;
     expectRightQuote(first, EXPECTED_QUOTE, misSource);
     expectRightQuote(second, EXPECTED_QUOTE, { ...misSource, cacheHit: true });
-    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(2);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
 });
 
-describe('StockQuoteService invalid symbol handling', () => {
+describe('StockQuoteService ticker fallback policy', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it('falls back to MIS when the ticker fails transiently while the quote succeeds', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('/intraday/ticker/')) {
+        return new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 });
+      }
+      if (String(input).includes('api.fugle.tw')) {
+        return new Response(JSON.stringify(FUGLE_BODY), { status: 200 });
+      }
+      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('2330')));
+
+    // The whole quote comes from MIS so the response source stays coherent.
+    expectRightQuote(result, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: null,
+    });
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
+  });
+
+  it('fails with StockNotFoundError on ticker 404 without calling MIS provider', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('api.fugle.tw')) {
+        return new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 });
+      }
+      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('999999')));
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('StockNotFoundError');
+    }
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+
+  it('does not fall back on Fugle 403', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('api.fugle.tw')) {
+        return new Response(JSON.stringify({ message: 'forbidden' }), { status: 403 });
+      }
+      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('2330')));
+
+    expect(Either.isLeft(result)).toBe(true);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
   it('fails with StockNotFoundError on Fugle 404 without calling MIS provider', async () => {
@@ -316,7 +384,7 @@ describe('StockQuoteService invalid symbol handling', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('StockNotFoundError');
     }
-    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'intraday/quote')).toBe(1);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 });

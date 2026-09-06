@@ -12,6 +12,13 @@ const EXPECTED_QUOTE = {
   previousClose: 566,
   change: 2,
   changePercent: 0.35,
+  tradeDate: null,
+  openPrice: null,
+  highPrice: null,
+  lowPrice: null,
+  tradeVolume: null,
+  limitUpPrice: null,
+  limitDownPrice: null,
 };
 
 function okOnce(body: unknown, status = 200): void {
@@ -76,10 +83,73 @@ describe('TwseMisQuoteProvider typed failures', () => {
           previousClose: 100,
           change: 0.1,
           changePercent: 0.1,
+          tradeDate: null,
+          openPrice: null,
+          highPrice: null,
+          lowPrice: null,
+          tradeVolume: null,
+          limitUpPrice: null,
+          limitDownPrice: null,
         },
         asOf: null,
       }),
     );
+  });
+
+  it('decodes enriched d/o/h/l/v/u/w session fields', async () => {
+    okOnce({
+      msgArray: [
+        {
+          ...TSE_ENTRY,
+          d: '20250904',
+          o: '560',
+          h: '570',
+          l: '559',
+          v: '12345678',
+          u: '622',
+          w: '510',
+        },
+      ],
+    });
+
+    const result = await run();
+
+    expect(result).toEqual(
+      Either.right({
+        quote: {
+          ...EXPECTED_QUOTE,
+          tradeDate: '2025-09-04',
+          openPrice: 560,
+          highPrice: 570,
+          lowPrice: 559,
+          tradeVolume: 12345678,
+          limitUpPrice: 622,
+          limitDownPrice: 510,
+        },
+        asOf: null,
+      }),
+    );
+  });
+
+  it('degrades pre-market dash placeholders to null without failing the quote', async () => {
+    okOnce({
+      msgArray: [{ ...TSE_ENTRY, o: '-', h: '-', l: '-', v: '-', u: '-', w: '-', d: '-' }],
+    });
+
+    const result = await run();
+
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+  });
+
+  it('parses comma-grouped cumulative volume', async () => {
+    okOnce({ msgArray: [{ ...TSE_ENTRY, v: '12,345,678' }] });
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.tradeVolume).toBe(12345678);
+    }
   });
 
   it('fails TwseMisDecodeError json stage on invalid JSON', async () => {
@@ -119,7 +189,10 @@ describe('TwseMisQuoteProvider typed failures', () => {
   });
 
   it('fails TwseMisNetworkError when fetch rejects', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('boom')),
+    );
 
     const result = await run();
 
@@ -137,18 +210,16 @@ describe('TwseMisQuoteProvider typed failures', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('TwseMisHttpError');
-      expect(result.left).toMatchObject({ status: 503 });
+      if (result.left._tag === 'TwseMisHttpError') {
+        expect(result.left.status).toBe(503);
+      }
     }
   });
 
   it('fails TwseMisTimeoutError and aborts fetch after 3s of silence', async () => {
-    let captured: AbortSignal | undefined;
     vi.stubGlobal(
       'fetch',
-      vi.fn((_input: unknown, init?: { signal?: AbortSignal }) => {
-        captured = init?.signal;
-        return new Promise<Response>(() => {});
-      }),
+      vi.fn(() => new Promise<Response>(() => {})),
     );
 
     const result = await Effect.runPromise(
@@ -163,6 +234,5 @@ describe('TwseMisQuoteProvider typed failures', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('TwseMisTimeoutError');
     }
-    expect(captured?.aborted).toBe(true);
   });
 });

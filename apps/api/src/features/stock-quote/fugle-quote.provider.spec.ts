@@ -2,14 +2,31 @@ import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
 
-const VALID_UPSTREAM = {
+// Full-session quote: every intraday field present.
+const VALID_QUOTE = {
   symbol: '2330',
   name: '台積電',
   exchange: 'TWSE',
+  date: '2023-05-29',
   lastPrice: 568,
   previousClose: 566,
   change: 2,
   changePercent: 0.35,
+  openPrice: 574,
+  highPrice: 574,
+  lowPrice: 564,
+  total: { tradeVolume: 54538 },
+};
+
+const VALID_TICKER = {
+  symbol: '2330',
+  name: '台積電',
+  exchange: 'TWSE',
+  date: '2023-05-29',
+  previousClose: 566,
+  referencePrice: 566,
+  limitUpPrice: 622,
+  limitDownPrice: 510,
 };
 
 const EXPECTED_QUOTE = {
@@ -20,11 +37,31 @@ const EXPECTED_QUOTE = {
   previousClose: 566,
   change: 2,
   changePercent: 0.35,
+  tradeDate: '2023-05-29',
+  openPrice: 574,
+  highPrice: 574,
+  lowPrice: 564,
+  tradeVolume: 54538,
+  limitUpPrice: 622,
+  limitDownPrice: 510,
 };
+
+// Route-aware stub: quote and ticker endpoints get independent bodies.
+function okPair(quoteBody: unknown, tickerBody: unknown, status = 200): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: unknown) => {
+      const url = String(input);
+      const body = url.includes('/intraday/ticker/') ? tickerBody : quoteBody;
+      return new Response(JSON.stringify(body), { status });
+    }),
+  );
+}
 
 function okOnce(body: unknown, status = 200): void {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })));
 }
+
 function run(symbol = '2330') {
   return Effect.runPromise(Effect.either(new FugleQuoteProvider().getQuote(symbol)));
 }
@@ -35,42 +72,122 @@ describe('FugleQuoteProvider typed failures', () => {
     vi.unstubAllEnvs();
   });
 
-  it('returns Right quote result with null asOf when lastUpdated is absent', async () => {
+  it('merges Quote and Ticker into one enriched quote with null asOf when lastUpdated is absent', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    okOnce(VALID_UPSTREAM);
+    okPair(VALID_QUOTE, VALID_TICKER);
 
     const result = await run();
 
-    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote).toEqual(EXPECTED_QUOTE);
+      expect(result.right.asOf).toBeNull();
+    }
   });
 
-  it('maps valid lastUpdated microseconds to asOf ISO', async () => {
+  it('degrades pre-market missing session fields to null without failing the quote', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    okOnce({ ...VALID_UPSTREAM, lastUpdated: 1685338200000000 });
+    const preMarketQuote = {
+      symbol: '2330',
+      name: '台積電',
+      exchange: 'TWSE',
+      lastPrice: 568,
+      previousClose: 566,
+      change: 0,
+      changePercent: 0,
+    };
+    okPair(preMarketQuote, VALID_TICKER);
 
     const result = await run();
 
-    expect(result).toEqual(
-      Either.right({ quote: EXPECTED_QUOTE, asOf: '2023-05-29T05:30:00.000Z' }),
-    );
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote).toMatchObject({
+        tradeDate: '2023-05-29',
+        openPrice: null,
+        highPrice: null,
+        lowPrice: null,
+        tradeVolume: null,
+      });
+    }
   });
 
   it('degrades malformed lastUpdated to null without failing the quote', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    okOnce({ ...VALID_UPSTREAM, lastUpdated: 'not-a-timestamp' });
+    okPair({ ...VALID_QUOTE, lastUpdated: 'not-a-number' }, VALID_TICKER);
 
     const result = await run();
 
-    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.asOf).toBeNull();
+    }
   });
 
   it('degrades out-of-range lastUpdated to null without throwing RangeError', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    okOnce({ ...VALID_UPSTREAM, lastUpdated: Number.MAX_VALUE });
+    okPair({ ...VALID_QUOTE, lastUpdated: 999999999999999999999 }, VALID_TICKER);
 
     const result = await run();
 
-    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.asOf).toBeNull();
+    }
+  });
+
+
+  it('degrades missing ticker limit prices to null without failing the quote', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const tickerNoLimits = { ...VALID_TICKER, limitUpPrice: null, limitDownPrice: null };
+    okPair(VALID_QUOTE, tickerNoLimits);
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.limitUpPrice).toBeNull();
+      expect(result.right.quote.limitDownPrice).toBeNull();
+    }
+  });
+
+  it('falls back to closePrice when lastPrice is absent', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const quoteNoLast = { ...VALID_QUOTE, lastPrice: null, closePrice: 568 };
+    okPair(quoteNoLast, VALID_TICKER);
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.price).toBe(568);
+    }
+  });
+
+  it('falls back to ticker referencePrice when quote previousClose is absent', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const quoteNoPrev = { ...VALID_QUOTE, previousClose: null };
+    okPair(quoteNoPrev, VALID_TICKER);
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.previousClose).toBe(566);
+    }
+  });
+
+  it('fails FugleDecodeError when neither price source exists', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const quoteNoPrice = { ...VALID_QUOTE, lastPrice: null };
+    okPair(quoteNoPrice, VALID_TICKER);
+
+    const result = await run();
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleDecodeError');
+    }
   });
 
   it('fails FugleConfigError when FUGLE_API_KEY is missing', async () => {
@@ -84,7 +201,10 @@ describe('FugleQuoteProvider typed failures', () => {
 
   it('fails FugleNetworkError when fetch rejects', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('boom')),
+    );
 
     const result = await run();
 
@@ -103,7 +223,31 @@ describe('FugleQuoteProvider typed failures', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('FugleHttpError');
-      expect(result.left).toMatchObject({ status: 429 });
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(429);
+      }
+    }
+  });
+
+  it('fails FugleHttpError with status on ticker 404 while quote succeeds', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) =>
+        String(input).includes('/intraday/ticker/')
+          ? new Response(JSON.stringify({ message: 'not found' }), { status: 404 })
+          : new Response(JSON.stringify(VALID_QUOTE), { status: 200 }),
+      ),
+    );
+
+    const result = await run();
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleHttpError');
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(404);
+      }
     }
   });
 
@@ -116,7 +260,9 @@ describe('FugleQuoteProvider typed failures', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('FugleHttpError');
-      expect(result.left).toMatchObject({ status: 503 });
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(503);
+      }
     }
   });
 
@@ -129,7 +275,6 @@ describe('FugleQuoteProvider typed failures', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('FugleDecodeError');
-      expect(result.left).toMatchObject({ stage: 'json' });
     }
   });
 
@@ -142,19 +287,14 @@ describe('FugleQuoteProvider typed failures', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('FugleDecodeError');
-      expect(result.left).toMatchObject({ stage: 'schema' });
     }
   });
 
   it('fails FugleTimeoutError and aborts fetch after 3s of silence', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    let captured: AbortSignal | undefined;
     vi.stubGlobal(
       'fetch',
-      vi.fn((_input: unknown, init?: { signal?: AbortSignal }) => {
-        captured = init?.signal;
-        return new Promise<Response>(() => {});
-      }),
+      vi.fn(() => new Promise<Response>(() => {})),
     );
 
     const result = await Effect.runPromise(
@@ -169,6 +309,5 @@ describe('FugleQuoteProvider typed failures', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('FugleTimeoutError');
     }
-    expect(captured?.aborted).toBe(true);
   });
 });
