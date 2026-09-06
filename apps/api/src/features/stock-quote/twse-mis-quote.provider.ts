@@ -64,6 +64,9 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
         highPrice: entry.h === undefined ? null : parseFiniteNumber(entry.h),
         lowPrice: entry.l === undefined ? null : parseFiniteNumber(entry.l),
         tradeVolume: entry.v === undefined ? null : parseFiniteNumber(entry.v),
+        // MIS v is natively lots (張), verified live against the daily share
+        // count — same unit as the Fugle side, so no conversion.
+        tradeVolumeUnit: 'lot' as const,
         limitUpPrice: entry.u === undefined ? null : parseFiniteNumber(entry.u),
         limitDownPrice: entry.w === undefined ? null : parseFiniteNumber(entry.w),
       }).pipe(Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })));

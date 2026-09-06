@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Duration, Effect, Schema } from 'effect';
+import { Duration, Effect, Either, Schema } from 'effect';
 import { StockQuoteSchema } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import {
@@ -33,10 +33,18 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
       }
 
       const encoded = encodeURIComponent(symbol);
-      const [quoteRaw, tickerRaw] = yield* Effect.all(
-        [fetchJson(`${FUGLE_QUOTE_URL}/${encoded}`, apiKey), fetchJson(`${FUGLE_TICKER_URL}/${encoded}`, apiKey)],
+      // Both outcomes are collected before deciding: Effect.all fail-fast
+      // would let a transient sibling mask a permanent 404 (or vice versa),
+      // making the fallback decision depend on network timing. The selection
+      // below is deterministic — see selectPrimaryError.
+      const [quoteOutcome, tickerOutcome] = yield* Effect.all(
+        [
+          Effect.either(fetchJson(`${FUGLE_QUOTE_URL}/${encoded}`, apiKey)),
+          Effect.either(fetchJson(`${FUGLE_TICKER_URL}/${encoded}`, apiKey)),
+        ],
         { concurrency: 2 },
       );
+      const [quoteRaw, tickerRaw] = yield* selectPrimaryOutcome(quoteOutcome, tickerOutcome);
 
       const fugle = yield* Schema.decodeUnknown(FugleQuoteSchema)(quoteRaw).pipe(
         Effect.mapError(() => new FugleDecodeError({ stage: 'schema' })),
@@ -64,12 +72,59 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
         highPrice: fugle.highPrice ?? null,
         lowPrice: fugle.lowPrice ?? null,
         tradeVolume: fugle.total?.tradeVolume ?? null,
+        tradeVolumeUnit: 'lot' as const,
         limitUpPrice: ticker.limitUpPrice ?? null,
         limitDownPrice: ticker.limitDownPrice ?? null,
       }).pipe(Effect.mapError(() => new FugleDecodeError({ stage: 'schema' })));
       return { quote, asOf: toIsoOrNull(fugle.lastUpdated) };
     });
   }
+}
+// Deterministic error precedence over the two concurrent outcomes. Both
+// endpoints describe the same symbol, so a proof of non-existence (404 from
+// either side) always wins over a transient sibling: falling back to MIS on
+// a 429 while the quote says 404 would serve a stale quote for a delisted
+// symbol. Auth/config failures (never fallback-eligible) win over transient
+// ones for the same reason. Ties resolve to the quote side. Pure — unit
+// tested directly and through the provider mixed-status tests.
+export function selectPrimaryError(quoteError: FugleQuoteError, tickerError: FugleQuoteError): FugleQuoteError {
+  const quoteRank = errorRank(quoteError);
+  const tickerRank = errorRank(tickerError);
+  return tickerRank < quoteRank ? tickerError : quoteError;
+}
+
+function selectPrimaryOutcome(
+  quoteOutcome: Either.Either<unknown, FugleQuoteError>,
+  tickerOutcome: Either.Either<unknown, FugleQuoteError>,
+): Effect.Effect<readonly [unknown, unknown], FugleQuoteError> {
+  if (Either.isRight(quoteOutcome) && Either.isRight(tickerOutcome)) {
+    return Effect.succeed([quoteOutcome.right, tickerOutcome.right] as const);
+  }
+  if (Either.isRight(quoteOutcome)) {
+    return Effect.fail((tickerOutcome as Either.Left<FugleQuoteError, unknown>).left);
+  }
+  if (Either.isRight(tickerOutcome)) {
+    return Effect.fail((quoteOutcome as Either.Left<FugleQuoteError, unknown>).left);
+  }
+  return Effect.fail(
+    selectPrimaryError(
+      (quoteOutcome as Either.Left<FugleQuoteError, unknown>).left,
+      (tickerOutcome as Either.Left<FugleQuoteError, unknown>).left,
+    ),
+  );
+}
+
+function errorRank(error: FugleQuoteError): number {
+  if (error._tag === 'FugleHttpError' && error.status === 404) {
+    return 0;
+  }
+  if (error._tag === 'FugleConfigError') {
+    return 1;
+  }
+  if (error._tag === 'FugleHttpError' && (error.status === 401 || error.status === 403)) {
+    return 1;
+  }
+  return 2;
 }
 
 // One upstream GET with the shared 3s budget. The signal is bound to fiber

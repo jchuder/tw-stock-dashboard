@@ -34,6 +34,7 @@ const EXPECTED_QUOTE = {
   highPrice: null,
   lowPrice: null,
   tradeVolume: null,
+  tradeVolumeUnit: 'lot',
   limitUpPrice: null,
   limitDownPrice: null,
 };
@@ -404,6 +405,7 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
         highPrice: 574,
         lowPrice: 564,
         tradeVolume: 54538,
+  tradeVolumeUnit: 'lot',
         limitUpPrice: 622,
         limitDownPrice: 510,
       },

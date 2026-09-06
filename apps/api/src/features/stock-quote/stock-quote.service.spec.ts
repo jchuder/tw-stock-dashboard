@@ -36,6 +36,7 @@ const EXPECTED_QUOTE = {
   highPrice: null,
   lowPrice: null,
   tradeVolume: null,
+  tradeVolumeUnit: 'lot',
   limitUpPrice: null,
   limitDownPrice: null,
 };
@@ -308,29 +309,27 @@ describe('StockQuoteService ticker fallback policy', () => {
     vi.unstubAllEnvs();
   });
 
-  it('falls back to MIS when the ticker fails transiently while the quote succeeds', async () => {
+
+  it('reports StockNotFound without MIS when quote 404 races ticker 429', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     const fetchMock = vi.fn(async (input: unknown) => {
-      if (String(input).includes('/intraday/ticker/')) {
-        return new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 });
+      if (String(input).includes('/intraday/quote/')) {
+        return new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 });
       }
       if (String(input).includes('api.fugle.tw')) {
-        return new Response(JSON.stringify(FUGLE_BODY), { status: 200 });
+        return new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 });
       }
       return new Response(JSON.stringify(MIS_BODY), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await Effect.runPromise(Effect.either(service().getQuote('2330')));
+    const result = await Effect.runPromise(Effect.either(service().getQuote('999999')));
 
-    // The whole quote comes from MIS so the response source stays coherent.
-    expectRightQuote(result, EXPECTED_QUOTE, {
-      provider: 'twse-mis',
-      fallbackUsed: true,
-      cacheHit: false,
-      asOf: null,
-    });
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('StockNotFoundError');
+    }
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
   it('fails with StockNotFoundError on ticker 404 without calling MIS provider', async () => {

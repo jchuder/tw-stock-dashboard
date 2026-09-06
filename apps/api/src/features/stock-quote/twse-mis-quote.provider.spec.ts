@@ -17,6 +17,7 @@ const EXPECTED_QUOTE = {
   highPrice: null,
   lowPrice: null,
   tradeVolume: null,
+  tradeVolumeUnit: 'lot',
   limitUpPrice: null,
   limitDownPrice: null,
 };
@@ -88,6 +89,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
           highPrice: null,
           lowPrice: null,
           tradeVolume: null,
+  tradeVolumeUnit: 'lot',
           limitUpPrice: null,
           limitDownPrice: null,
         },
@@ -217,9 +219,13 @@ describe('TwseMisQuoteProvider typed failures', () => {
   });
 
   it('fails TwseMisTimeoutError and aborts fetch after 3s of silence', async () => {
+    let signal: AbortSignal | undefined;
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => new Promise<Response>(() => {})),
+      vi.fn(async (_input: unknown, init?: { signal?: AbortSignal }) => {
+        signal = init?.signal;
+        return new Promise<Response>(() => {});
+      }),
     );
 
     const result = await Effect.runPromise(
@@ -234,5 +240,6 @@ describe('TwseMisQuoteProvider typed failures', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('TwseMisTimeoutError');
     }
+    expect(signal?.aborted).toBe(true);
   });
 });

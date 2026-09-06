@@ -89,6 +89,7 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
       market: 'TWSE',
       range: '1m',
       timeframe: '1d',
+      volumeUnit: 'share',
       candles: EXPECTED_CANDLES,
     });
   });

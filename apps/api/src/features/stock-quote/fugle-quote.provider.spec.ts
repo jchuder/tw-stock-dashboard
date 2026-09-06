@@ -1,6 +1,7 @@
 import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import { FugleHttpError, FugleNetworkError, FugleTimeoutError } from './fugle-quote.error.js';
+import { FugleQuoteProvider, selectPrimaryError } from './fugle-quote.provider.js';
 
 // Full-session quote: every intraday field present.
 const VALID_QUOTE = {
@@ -42,17 +43,24 @@ const EXPECTED_QUOTE = {
   highPrice: 574,
   lowPrice: 564,
   tradeVolume: 54538,
+  tradeVolumeUnit: 'lot',
   limitUpPrice: 622,
   limitDownPrice: 510,
 };
 
 // Route-aware stub: quote and ticker endpoints get independent bodies.
 function okPair(quoteBody: unknown, tickerBody: unknown, status = 200): void {
+  statusPair(status, status, quoteBody, tickerBody);
+}
+
+// Independent HTTP statuses per endpoint for mixed-failure precedence tests.
+function statusPair(quoteStatus: number, tickerStatus: number, quoteBody: unknown, tickerBody: unknown): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown) => {
-      const url = String(input);
-      const body = url.includes('/intraday/ticker/') ? tickerBody : quoteBody;
+      const isTicker = String(input).includes('/intraday/ticker/');
+      const body = isTicker ? tickerBody : quoteBody;
+      const status = isTicker ? tickerStatus : quoteStatus;
       return new Response(JSON.stringify(body), { status });
     }),
   );
@@ -108,6 +116,7 @@ describe('FugleQuoteProvider typed failures', () => {
         highPrice: null,
         lowPrice: null,
         tradeVolume: null,
+  tradeVolumeUnit: 'lot',
       });
     }
   });
@@ -290,11 +299,17 @@ describe('FugleQuoteProvider typed failures', () => {
     }
   });
 
-  it('fails FugleTimeoutError and aborts fetch after 3s of silence', async () => {
+  it('fails FugleTimeoutError and aborts both upstream fetches after 3s of silence', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const signals: AbortSignal[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => new Promise<Response>(() => {})),
+      vi.fn(async (_input: unknown, init?: { signal?: AbortSignal }) => {
+        if (init?.signal) {
+          signals.push(init.signal);
+        }
+        return new Promise<Response>(() => {});
+      }),
     );
 
     const result = await Effect.runPromise(
@@ -309,5 +324,82 @@ describe('FugleQuoteProvider typed failures', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('FugleTimeoutError');
     }
+    // Both in-flight fetches are really cancelled, not just ignored.
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it('prefers quote 404 over ticker 429 regardless of completion order', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    statusPair(404, 429, { message: 'not found' }, { message: 'rate limited' });
+
+    const result = await run();
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleHttpError');
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(404);
+      }
+    }
+  });
+
+  it('prefers ticker 404 over quote 429 regardless of completion order', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    statusPair(429, 404, { message: 'rate limited' }, { message: 'not found' });
+
+    const result = await run();
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleHttpError');
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(404);
+      }
+    }
+  });
+
+  it('prefers quote 403 over ticker 503', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    statusPair(403, 503, { message: 'forbidden' }, { message: 'downstream' });
+
+    const result = await run();
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleHttpError');
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(403);
+      }
+    }
+  });
+
+  it('prefers ticker 403 over quote 503', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    statusPair(503, 403, { message: 'downstream' }, { message: 'forbidden' });
+
+    const result = await run();
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('FugleHttpError');
+      if (result.left._tag === 'FugleHttpError') {
+        expect(result.left.status).toBe(403);
+      }
+    }
+  });
+});
+
+describe('selectPrimaryError precedence', () => {
+  it('ranks 404 above auth errors above transient errors', () => {
+    const notFound = new FugleHttpError({ status: 404 });
+    const forbidden = new FugleHttpError({ status: 403 });
+    const rateLimited = new FugleHttpError({ status: 429 });
+
+    expect(selectPrimaryError(notFound, rateLimited)).toBe(notFound);
+    expect(selectPrimaryError(rateLimited, notFound)).toBe(notFound);
+    expect(selectPrimaryError(forbidden, rateLimited)).toBe(forbidden);
+    expect(selectPrimaryError(rateLimited, forbidden)).toBe(forbidden);
+    expect(selectPrimaryError(new FugleNetworkError(), new FugleTimeoutError())._tag).toBe('FugleNetworkError');
   });
 });

@@ -60,6 +60,7 @@ export class StockHistoryService {
         market: historical.market,
         range,
         timeframe: '5m' as const,
+        volumeUnit: 'lot' as const,
         candles: cropToLastTradingDays(withMa, INTRADAY_TRADING_DAYS[range]),
       };
     });
@@ -88,6 +89,7 @@ export class StockHistoryService {
         market: first.market,
         range,
         timeframe: '1d' as const,
+        volumeUnit: 'share' as const,
         candles: visibleCandles,
       };
     });
