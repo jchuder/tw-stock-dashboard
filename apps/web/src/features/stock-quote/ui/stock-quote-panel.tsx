@@ -94,34 +94,48 @@ export function StockQuotePanel({
 
   return (
     <section>
-      <form onSubmit={onSubmit}>
+      <form onSubmit={onSubmit} className="search-form">
         <input
           aria-label="股票代碼"
           placeholder="2330"
           value={input}
           onChange={(event) => setInput(event.target.value)}
+          className="search-input"
         />
-        <button type="submit">查詢</button>
+        <button type="submit" className="btn-primary">查詢</button>
       </form>
-      {quote.isPending && submitted !== null && <p>載入中…</p>}
+      {quote.isPending && submitted !== null && <p style={{ color: '#64748b', margin: '8px 0 0' }}>載入中…</p>}
       {quote.isError && (
         quote.error instanceof StockQuoteRequestError && quote.error.status === 404 ? (
-          <p>查無此股票代號</p>
+          <p style={{ color: '#dc2626', margin: '8px 0 0' }}>查無此股票代號</p>
         ) : (
-          <p>查詢失敗，請稍後再試</p>
+          <p style={{ color: '#dc2626', margin: '8px 0 0' }}>查詢失敗，請稍後再試</p>
         )
       )}
       {quote.isSuccess && source && (
-        <div data-testid="stock-quote-info">
-          <p data-testid="stock-quote-title">
-            {quote.data.symbol} {quote.data.name}
-          </p>
-          <p data-testid="stock-quote-price">{quote.data.price}</p>
-          <p>{formatSigned(quote.data.change)}</p>
-          <p>{formatSigned(quote.data.changePercent, '%')}</p>
-          <p>資料來源：{PROVIDER_LABELS[source.provider]}</p>
-          {source.cacheHit && <p>快取</p>}
-          {source.asOf !== null && <p>資料時間：{new Date(source.asOf).toLocaleString()}</p>}
+        <div data-testid="stock-quote-info" style={{ marginTop: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap', marginBottom: '6px' }}>
+            <span data-testid="stock-quote-title" style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
+              {quote.data.symbol} {quote.data.name}
+            </span>
+            <span data-testid="stock-quote-price" style={{ fontSize: '1.75rem', fontWeight: '800', letterSpacing: '-0.02em' }}>
+              {quote.data.price}
+            </span>
+            <span
+              style={{
+                fontSize: '1.1rem',
+                fontWeight: '700',
+                color: quote.data.change > 0 ? '#dc2626' : quote.data.change < 0 ? '#16a34a' : 'inherit',
+              }}
+            >
+              {formatSigned(quote.data.change)} ({formatSigned(quote.data.changePercent, '%')})
+            </span>
+          </div>
+          <div className="quote-meta-row">
+            <span>上市 · 資料來源：{PROVIDER_LABELS[source.provider]}</span>
+            {source.cacheHit && <span className="badge-cache">快取</span>}
+            {source.asOf !== null && <span>資料時間：{new Date(source.asOf).toLocaleString()}</span>}
+          </div>
         </div>
       )}
     </section>

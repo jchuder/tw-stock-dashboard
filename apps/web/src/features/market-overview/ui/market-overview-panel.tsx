@@ -42,23 +42,15 @@ function IndexCard({
   const color = getChangeColor(snapshot.change);
 
   return (
-    <div
-      style={{
-        border: '1px solid #e5e7eb',
-        borderRadius: '8px',
-        padding: '16px',
-        minWidth: '200px',
-      }}
-      data-testid={`market-index-${title}`}
-    >
-      <h3 style={{ margin: '0 0 8px 0', fontSize: '1.1rem' }}>{title}</h3>
-      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '4px' }}>
+    <div className="dashboard-card" data-testid={`market-index-${title}`}>
+      <h3 style={{ margin: '0 0 8px 0', fontSize: '1rem', color: '#64748b' }}>{title}</h3>
+      <div style={{ fontSize: '1.75rem', fontWeight: '800', marginBottom: '4px', letterSpacing: '-0.02em' }}>
         {formatNumberWithCommas(snapshot.close)}
       </div>
-      <div style={{ color, fontWeight: 'bold', marginBottom: '8px' }}>
+      <div style={{ color, fontWeight: '700', marginBottom: '8px', fontSize: '1.05rem' }}>
         {formatIndexChange(snapshot.change, snapshot.changePercent)}
       </div>
-      <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
         {snapshot.asOf} 收盤
       </div>
     </div>
@@ -88,30 +80,14 @@ export function MarketOverviewPanel(): JSX.Element {
 
   return (
     <section aria-label="市場概況" style={{ marginBottom: '24px' }}>
-      <h2>市場概況</h2>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '16px',
-          alignItems: 'flex-start',
-        }}
-      >
+      <div className="market-overview-grid">
         <IndexCard title="加權指數" snapshot={taiex} />
         <IndexCard title="櫃買指數" snapshot={otc} />
 
-        <div
-          style={{
-            border: '1px solid #e5e7eb',
-            borderRadius: '8px',
-            padding: '16px',
-            minWidth: '220px',
-          }}
-          data-testid="market-institutional"
-        >
-          <h3 style={{ margin: '0 0 8px 0', fontSize: '1.1rem' }}>上市三大法人</h3>
-          <div style={{ fontSize: '0.85rem', color: '#6b7280', marginBottom: '8px' }}>
-            {institutional.asOf}
+        <div className="dashboard-card" data-testid="market-institutional">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+            <h3 style={{ margin: 0, fontSize: '1rem', color: '#64748b' }}>上市三大法人</h3>
+            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{institutional.asOf}</span>
           </div>
           <table style={{ width: '100%', fontSize: '0.95rem' }}>
             <tbody>

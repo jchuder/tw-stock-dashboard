@@ -26,7 +26,7 @@ export function StockAnalysis(): JSX.Element {
   };
 
   const onSelectWatchlistStock = (symbol: string): void => {
-    if (symbol === requestedSymbol) {
+    if (symbol === requestedSymbol && validatedStock !== null) {
       return;
     }
     setRequestedSymbol(symbol);
@@ -52,44 +52,48 @@ export function StockAnalysis(): JSX.Element {
     validatedStock !== null && watchlist.some((item) => item.symbol === validatedStock.symbol);
 
   return (
-    <section>
-      <StockWatchlistPanel
-        items={watchlist}
-        activeSymbol={validatedStock?.symbol ?? requestedSymbol}
-        onSelectStock={onSelectWatchlistStock}
-        onRemoveStock={onRemoveWatchlistStock}
-      />
-
-      <div style={{ marginTop: '16px' }}>
-        <StockQuotePanel
-          requestedSymbol={requestedSymbol}
-          onSymbolSubmitted={onSymbolSubmitted}
-          onQuoteResolved={setValidatedStock}
+    <div className="dashboard-content">
+      <aside>
+        <StockWatchlistPanel
+          items={watchlist}
+          activeSymbol={validatedStock?.symbol ?? requestedSymbol}
+          onSelectStock={onSelectWatchlistStock}
+          onRemoveStock={onRemoveWatchlistStock}
         />
+      </aside>
 
-        {validatedStock !== null && (
-          <div style={{ margin: '8px 0' }}>
-            <button
-              type="button"
-              onClick={onAddCurrentToWatchlist}
-              disabled={isCurrentInWatchlist}
-              style={{
-                padding: '4px 12px',
-                fontSize: '0.9rem',
-                borderRadius: '4px',
-                border: '1px solid #d1d5db',
-                cursor: isCurrentInWatchlist ? 'default' : 'pointer',
-                backgroundColor: isCurrentInWatchlist ? '#f3f4f6' : '#ffffff',
-                color: isCurrentInWatchlist ? '#9ca3af' : '#111827',
-              }}
-            >
-              {isCurrentInWatchlist ? '已在自選' : '加入自選'}
-            </button>
+      <div className="analysis-area">
+        <div className="dashboard-card">
+          <StockQuotePanel
+            requestedSymbol={requestedSymbol}
+            onSymbolSubmitted={onSymbolSubmitted}
+            onQuoteResolved={setValidatedStock}
+          />
+
+          {validatedStock !== null && (
+            <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+              <button
+                type="button"
+                onClick={onAddCurrentToWatchlist}
+                disabled={isCurrentInWatchlist}
+                className="btn-control"
+              >
+                {isCurrentInWatchlist ? '已在自選' : '加入自選'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {validatedStock === null ? (
+          <div className="empty-analysis-state">
+            <p style={{ margin: 0, fontSize: '0.95rem', lineHeight: 1.6 }}>
+              輸入股票代號或從自選清單選擇股票<br />即可查看即時報價與近期走勢
+            </p>
           </div>
+        ) : (
+          <StockHistoryPanel symbol={validatedStock.symbol} />
         )}
-
-        {validatedStock !== null && <StockHistoryPanel symbol={validatedStock.symbol} />}
       </div>
-    </section>
+    </div>
   );
 }

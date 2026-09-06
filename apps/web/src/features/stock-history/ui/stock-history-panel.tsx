@@ -34,54 +34,79 @@ export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
   };
 
   return (
-    <section>
-      <div>
-        {RANGES.map((option) => (
-          <button key={option.value} type="button" aria-pressed={range === option.value} onClick={() => setRange(option.value)}>
-            {option.label}
-          </button>
-        ))}
+    <section style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="dashboard-card" style={{ padding: '12px 16px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600, marginRight: '4px' }}>期間</span>
+            {RANGES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className="btn-control"
+                aria-pressed={range === option.value}
+                onClick={() => setRange(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600, marginRight: '4px' }}>均線</span>
+            {MA_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                className="btn-control"
+                aria-pressed={maVisibility[key]}
+                onClick={() => toggleMa(key)}
+              >
+                {key.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      <div>
-        {MA_KEYS.map((key) => (
-          <button key={key} type="button" aria-pressed={maVisibility[key]} onClick={() => toggleMa(key)}>
-            {key.toUpperCase()}
-          </button>
-        ))}
-      </div>
-      {history.isPending && <p>歷史資料載入中…</p>}
-      {history.isError && <p>歷史資料載入失敗，請稍後再試</p>}
-      {history.isSuccess && history.data.candles.length === 0 && <p>暫無歷史交易資料</p>}
+
+      {history.isPending && <p style={{ color: '#64748b' }}>歷史資料載入中…</p>}
+      {history.isError && <p style={{ color: '#dc2626' }}>歷史資料載入失敗，請稍後再試</p>}
+      {history.isSuccess && history.data.candles.length === 0 && <p style={{ color: '#64748b' }}>暫無歷史交易資料</p>}
       {history.isSuccess && history.data.candles.length > 0 && (
-        <div>
-          <StockHistoryChart candles={history.data.candles} maVisibility={maVisibility} />
-          <table>
-            <thead>
-              <tr>
-                <th>日期</th>
-                <th>開盤</th>
-                <th>最高</th>
-                <th>最低</th>
-                <th>收盤</th>
-                <th>成交量</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.data.candles
-                .slice(-5)
-                .reverse()
-                .map((candle) => (
-                  <tr key={candle.date}>
-                    <td>{candle.date}</td>
-                    <td>{candle.open}</td>
-                    <td>{candle.high}</td>
-                    <td>{candle.low}</td>
-                    <td>{candle.close}</td>
-                    <td>{candle.volume}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="chart-card">
+            <StockHistoryChart candles={history.data.candles} maVisibility={maVisibility} />
+          </div>
+
+          <div className="table-card">
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: '#64748b' }}>最近交易資料</h4>
+            <table>
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>開盤</th>
+                  <th>最高</th>
+                  <th>最低</th>
+                  <th>收盤</th>
+                  <th>成交量</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.data.candles
+                  .slice(-5)
+                  .reverse()
+                  .map((candle) => (
+                    <tr key={candle.date}>
+                      <td>{candle.date}</td>
+                      <td>{candle.open.toLocaleString()}</td>
+                      <td>{candle.high.toLocaleString()}</td>
+                      <td>{candle.low.toLocaleString()}</td>
+                      <td>{candle.close.toLocaleString()}</td>
+                      <td>{candle.volume.toLocaleString()}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </section>
