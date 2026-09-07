@@ -10,6 +10,21 @@ import { monthlyHistoryCacheKey, monthlyHistoryCacheTtl } from './official-daily
 export const TPEX_ESB_HISTORICAL_URL = 'https://www.tpex.org.tw/www/zh-tw/emerging/historical';
 const UPSTREAM_TIMEOUT_MS = 3000;
 const ESB_ROW_LENGTH = 13;
+const EXPECTED_ESB_FIELDS = [
+  '日期',
+  '成交股數',
+  '成交金額(元)',
+  '成交最高',
+  '成交最低',
+  '成交均價',
+  '筆數',
+  '成交股數',
+  '成交金額(元)',
+  '成交最高',
+  '成交最低',
+  '成交均價',
+  '筆數',
+] as const;
 
 export interface TpexEsbHistoryResult {
   symbol: string;
@@ -21,7 +36,7 @@ export interface TpexEsbHistoryResult {
 interface TpexEsbResponse {
   stat?: unknown;
   date?: unknown;
-  tables?: Array<{ data?: unknown }>;
+  tables?: Array<{ data?: unknown; fields?: unknown }>;
 }
 
 function parseRocDate(value: unknown): string {
@@ -59,9 +74,28 @@ function parseFiniteNumber(value: unknown): number {
   return parsed;
 }
 
-function parseNullablePrice(value: unknown): number | null {
+function parseNonNegativeVolume(value: unknown): number {
   const parsed = parseFiniteNumber(value);
-  return parsed === 0 ? null : parsed;
+  if (parsed < 0) {
+    throw new Error(`Invalid negative ESB volume: ${String(value)}`);
+  }
+  return parsed;
+}
+
+function parsePositivePrice(value: unknown): number {
+  const parsed = parseFiniteNumber(value);
+  if (parsed <= 0) {
+    throw new Error(`Invalid non-positive ESB price: ${String(value)}`);
+  }
+  return parsed;
+}
+
+function hasExpectedFields(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length === EXPECTED_ESB_FIELDS.length &&
+    value.every((field, index) => field === EXPECTED_ESB_FIELDS[index])
+  );
 }
 
 function parseRows(data: unknown, month: string): AverageBasisCandle[] {
@@ -70,7 +104,7 @@ function parseRows(data: unknown, month: string): AverageBasisCandle[] {
   }
 
   return data.map((value) => {
-    if (!Array.isArray(value) || value.length < ESB_ROW_LENGTH) {
+    if (!Array.isArray(value) || value.length !== ESB_ROW_LENGTH) {
       throw new Error('TPEx ESB returned an unexpected row shape');
     }
 
@@ -79,17 +113,17 @@ function parseRows(data: unknown, month: string): AverageBasisCandle[] {
       throw new Error(`TPEx ESB returned a row outside requested month ${month}: ${date}`);
     }
 
-    const computerVolume = parseFiniteNumber(value[1]);
-    const negotiatedVolume = parseFiniteNumber(value[7]);
+    const computerVolume = parseNonNegativeVolume(value[1]);
+    const negotiatedVolume = parseNonNegativeVolume(value[7]);
     const hasComputerPrices = computerVolume > 0;
 
     return {
       date,
       open: null,
-      high: hasComputerPrices ? parseNullablePrice(value[3]) : null,
-      low: hasComputerPrices ? parseNullablePrice(value[4]) : null,
+      high: hasComputerPrices ? parsePositivePrice(value[3]) : null,
+      low: hasComputerPrices ? parsePositivePrice(value[4]) : null,
       close: null,
-      average: hasComputerPrices ? parseNullablePrice(value[5]) : null,
+      average: hasComputerPrices ? parsePositivePrice(value[5]) : null,
       volume: computerVolume + negotiatedVolume,
     };
   });
@@ -183,8 +217,14 @@ export class TpexEsbHistoryProvider {
         }
         const json = (await res.json()) as TpexEsbResponse;
         const expectedResponseDate = `${month}01`;
-        const data = json.tables?.[0]?.data;
-        if (json.stat !== 'ok' || json.date !== expectedResponseDate || !Array.isArray(data)) {
+        const table = json.tables?.[0];
+        const data = table?.data;
+        if (
+          json.stat !== 'ok' ||
+          json.date !== expectedResponseDate ||
+          !hasExpectedFields(table?.fields) ||
+          !Array.isArray(data)
+        ) {
           throw new Error('TPEx ESB returned an unexpected monthly response');
         }
         return parseRows(data, month);

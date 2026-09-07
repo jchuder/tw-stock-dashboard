@@ -12,6 +12,21 @@ const ESB_SECURITY: Security = {
   market: 'ESB',
   type: 'stock',
 };
+const EXPECTED_FIELDS = [
+  '日期',
+  '成交股數',
+  '成交金額(元)',
+  '成交最高',
+  '成交最低',
+  '成交均價',
+  '筆數',
+  '成交股數',
+  '成交金額(元)',
+  '成交最高',
+  '成交最低',
+  '成交均價',
+  '筆數',
+] as const;
 
 function makeCache(initial: Record<string, unknown> = {}): TestCache {
   const values = new Map(Object.entries(initial));
@@ -29,12 +44,16 @@ function createProvider(cache = makeCache()): TpexEsbHistoryProvider {
   return new TpexEsbHistoryProvider(cache);
 }
 
-function response(data: unknown[], date = '20260801'): Response {
+function response(
+  data: unknown[],
+  date = '20260801',
+  fields: ReadonlyArray<string> = EXPECTED_FIELDS,
+): Response {
   return new Response(
     JSON.stringify({
       stat: 'ok',
       date,
-      tables: [{ data }],
+      tables: [{ data, fields }],
     }),
     { status: 200 },
   );
@@ -121,6 +140,77 @@ describe('TpexEsbHistoryProvider', () => {
     if (either._tag === 'Left') {
       expect(either.left._tag).toBe('OfficialDailyHistoryError');
     }
+    expect(cache.setJson).not.toHaveBeenCalled();
+  });
+  it.each([
+    {
+      kind: 'renamed',
+      fields: [...EXPECTED_FIELDS.slice(0, -1), '異常欄位'],
+    },
+    {
+      kind: 'reordered',
+      fields: [EXPECTED_FIELDS[1], EXPECTED_FIELDS[0], ...EXPECTED_FIELDS.slice(2)],
+    },
+    {
+      kind: 'extra',
+      fields: [...EXPECTED_FIELDS, '額外欄位'],
+    },
+  ])('rejects $kind fields without caching', async ({ fields }) => {
+    const cache = makeCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        response(
+          [['115/08/05', '1,000', '235,000', '240.00', '230.00', '235.00', '4', '0', '0', '0.00', '0.00', '0.00', '0']],
+          '20260801',
+          fields,
+        ),
+      ),
+    );
+
+    const either = await Effect.runPromise(
+      Effect.either(createProvider(cache).getDailyHistory(ESB_SECURITY, '2026-08-01', '2026-08-31')),
+    );
+
+    expect(either._tag).toBe('Left');
+    expect(cache.setJson).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-positive first-group price when the first group has volume', async () => {
+    const cache = makeCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        response([
+          ['115/08/07', '1,000', '235,000', '240.00', '230.00', '0.00', '4', '0', '0', '0.00', '0.00', '0.00', '0'],
+        ]),
+      ),
+    );
+
+    const either = await Effect.runPromise(
+      Effect.either(createProvider(cache).getDailyHistory(ESB_SECURITY, '2026-08-01', '2026-08-31')),
+    );
+
+    expect(either._tag).toBe('Left');
+    expect(cache.setJson).not.toHaveBeenCalled();
+  });
+
+  it('rejects negative group volume without caching it', async () => {
+    const cache = makeCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        response([
+          ['115/08/08', '-1', '0', '0.00', '0.00', '0.00', '0', '0', '0', '0.00', '0.00', '0.00', '0'],
+        ]),
+      ),
+    );
+
+    const either = await Effect.runPromise(
+      Effect.either(createProvider(cache).getDailyHistory(ESB_SECURITY, '2026-08-01', '2026-08-31')),
+    );
+
+    expect(either._tag).toBe('Left');
     expect(cache.setJson).not.toHaveBeenCalled();
   });
 
