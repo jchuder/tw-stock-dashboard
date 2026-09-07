@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
-import type { Candle, HistoryRange, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
+import type { Candle, HistoryRange, PriceBasis, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
 import { fetchStockHistory } from '../api/stock-history.api.js';
 import { StockHistoryChart } from './stock-history-chart.js';
 import type { MaVisibility } from './stock-history-chart.js';
@@ -47,15 +47,29 @@ export interface HistoryControls {
 
 export function formatChartSourceText(source: StockHistoryResponse['source']): string {
   const providerLabel =
-    source.provider === 'fugle' ? 'Fugle' : source.provider === 'twse' ? 'TWSE' : 'TPEx';
+    source.provider === 'fugle'
+      ? 'Fugle'
+      : source.provider === 'twse'
+        ? 'TWSE'
+        : source.provider === 'tpex-esb'
+          ? 'TPEx 興櫃'
+          : 'TPEx';
   const modeLabel =
     source.mode === 'intraday'
       ? '即時 5 分 K'
       : source.provider === 'fugle'
         ? '盤後日 K'
-        : '官方盤後日 K';
+        : source.provider === 'tpex-esb'
+          ? '官方日均價'
+          : '官方盤後日 K';
   const asOfText = source.asOf ? ` · 更新至 ${source.asOf.replace(/-/g, '/')}` : '';
   return `${providerLabel} · ${modeLabel}${asOfText}`;
+}
+
+export function getHistoryTableHeaders(priceBasis: PriceBasis): readonly string[] {
+  return priceBasis === 'average'
+    ? ['日期', '最高價', '最低價', '平均價', '成交量（股）']
+    : ['日期', '開盤價', '收盤價', '最高價', '最低價', '成交量（股）'];
 }
 
 // Focus-card section: MA legend, chart, then periods below the chart. Plain
@@ -98,6 +112,14 @@ export function StockHistoryFocus({
             </button>
           );
         })}
+        {history.data?.priceBasis === 'average' && (
+          <span
+            data-testid="average-price-legend"
+            style={{ color: '#374151', fontSize: '0.75rem', fontWeight: 600 }}
+          >
+            平均價
+          </span>
+        )}
         <span className="chart-toggle-hint">點按左側圖例可切換顯示</span>
       </div>
       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0' }}>
@@ -144,6 +166,7 @@ export function StockHistoryFocus({
           <StockHistoryChart
             candles={history.data.candles}
             timeframe={history.data.timeframe}
+            priceBasis={history.data.priceBasis}
             maVisibility={maVisibility}
           />
           <div className="periods" role="group" aria-label="K 線期間">
@@ -178,10 +201,10 @@ export function StockHistoryFocus({
   );
 }
 
-function getPriceClass(value: number | null, prevClose: number | null): string | undefined {
-  if (value === null || prevClose === null) return undefined;
-  if (value > prevClose) return 'price-up';
-  if (value < prevClose) return 'price-down';
+function getPriceClass(value: number | null, prevPrice: number | null): string | undefined {
+  if (value === null || prevPrice === null) return undefined;
+  if (value > prevPrice) return 'price-up';
+  if (value < prevPrice) return 'price-down';
   return undefined;
 }
 
@@ -196,10 +219,12 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
     retry: false,
   });
 
+  const priceBasis = table.data?.priceBasis ?? 'close';
   const tableCandles: ReadonlyArray<Candle> | null = table.data?.candles ?? null;
   const rows = (tableCandles ?? []).map((candle, index, arr) => ({
     ...candle,
-    prevClose: index > 0 ? arr[index - 1].close : null,
+    prevPrice:
+      index > 0 ? (priceBasis === 'average' ? arr[index - 1].average : arr[index - 1].close) : null,
   }));
   const displayRows = rows.slice(-5).reverse();
 
@@ -217,22 +242,35 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
         <table data-testid="recent-trading-table">
           <thead>
             <tr>
-              <th>日期</th>
-              <th>開盤價</th>
-              <th>收盤價</th>
-              <th>最高價</th>
-              <th>最低價</th>
-              <th>成交量（股）</th>
+              {getHistoryTableHeaders(priceBasis).map((header) => (
+                <th key={header}>{header}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {displayRows.map((candle) => (
               <tr key={candle.date}>
                 <td>{candle.date}</td>
-                <td className={getPriceClass(candle.open, candle.prevClose)}>{candle.open === null ? '—' : candle.open.toLocaleString()}</td>
-                <td className={getPriceClass(candle.close, candle.prevClose)}>{candle.close === null ? '—' : candle.close.toLocaleString()}</td>
-                <td className={getPriceClass(candle.high, candle.prevClose)}>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
-                <td className={getPriceClass(candle.low, candle.prevClose)}>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
+                {priceBasis === 'average' ? (
+                  <>
+                    <td>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
+                    <td>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
+                    <td className={getPriceClass(candle.average, candle.prevPrice)}>
+                      {candle.average === null ? '—' : candle.average.toLocaleString()}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className={getPriceClass(candle.open, candle.prevPrice)}>
+                      {candle.open === null ? '—' : candle.open.toLocaleString()}
+                    </td>
+                    <td className={getPriceClass(candle.close, candle.prevPrice)}>
+                      {candle.close === null ? '—' : candle.close.toLocaleString()}
+                    </td>
+                    <td>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
+                    <td>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
+                  </>
+                )}
                 <td>{candle.volume.toLocaleString()}</td>
               </tr>
             ))}
