@@ -13,26 +13,38 @@ export function classifyIndexState(
   candidate: RawMisIndexCandidate,
   now: Date = new Date(),
 ): MarketIndexSnapshot {
-  const taipeiToday = new Intl.DateTimeFormat('en-CA', {
+  const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Taipei',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(now);
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+
+  const byType: Record<string, string> = {};
+  for (const part of parts) {
+    byType[part.type] = part.value;
+  }
+
+  const taipeiToday = `${byType.year}-${byType.month}-${byType.day}`;
+  const taipeiNowTime = `${byType.hour}:${byType.minute}:${byType.second}`;
 
   const isIntraday =
     candidate.tradeDate === taipeiToday &&
-    candidate.time >= '09:00:00' &&
-    candidate.time < '13:30:00';
+    taipeiNowTime >= '09:00:00' &&
+    taipeiNowTime < '13:35:00';
 
   return {
     value: candidate.value,
     change: candidate.change,
     changePercent: candidate.changePercent,
-    state: isIntraday ? 'intraday' : 'closed',
+    state: isIntraday ? ('intraday' as const) : ('closed' as const),
     tradeDate: candidate.tradeDate,
     asOf: isIntraday ? candidate.asOf : null,
-    source: 'twse-mis',
+    source: 'twse-mis' as const,
   };
 }
 

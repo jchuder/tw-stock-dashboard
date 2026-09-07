@@ -4,7 +4,7 @@ import type { MarketIndexSnapshot } from '@tw-stock-dashboard/contracts';
 import {
   formatTaipeiDate,
   formatTaipeiTime,
-  isTaipeiTradingWindow,
+  getMarketOverviewRefetchInterval,
 } from '../../../shared/datetime/format-taipei.js';
 import { fetchMarketOverview } from '../api/market-overview.api.js';
 
@@ -48,7 +48,7 @@ function IndexCard({
       </div>
       <div className="mini-meta">
         {snapshot.state === 'intraday' && snapshot.asOf
-          ? `盤中行情 · ${formatTaipeiTime(snapshot.asOf)}`
+          ? `即時行情 · ${formatTaipeiTime(snapshot.asOf)}`
           : `${formatTaipeiDate(snapshot.tradeDate)} 收盤`}
       </div>
     </article>
@@ -59,7 +59,7 @@ export function MarketOverviewPanel(): JSX.Element {
   const query = useQuery({
     queryKey: ['market-overview'],
     queryFn: fetchMarketOverview,
-    refetchInterval: () => (isTaipeiTradingWindow() ? 30_000 : false),
+    refetchInterval: () => getMarketOverviewRefetchInterval(),
     retry: false,
   });
 

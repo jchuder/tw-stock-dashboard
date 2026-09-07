@@ -172,11 +172,11 @@ test('market overview displays intraday time correctly when in intraday state', 
   const taiexCard = page.getByTestId('market-index-加權指數 (TAIEX)');
   await expect(taiexCard).toBeVisible();
   await expect(taiexCard).toContainText('47,326.27');
-  await expect(taiexCard).toContainText('盤中行情 · 10:30:00');
+  await expect(taiexCard).toContainText('即時行情 · 10:30:00');
 
   const otcCard = page.getByTestId('market-index-櫃買指數 (OTC)');
   await expect(otcCard).toBeVisible();
   await expect(otcCard).toContainText('409.33');
-  await expect(otcCard).toContainText('盤中行情 · 10:30:00');
+  await expect(otcCard).toContainText('即時行情 · 10:30:00');
 });
 

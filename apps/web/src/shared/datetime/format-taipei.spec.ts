@@ -3,6 +3,7 @@ import {
   formatTaipeiDate,
   formatTaipeiDateTime,
   formatTaipeiTime,
+  getMarketOverviewRefetchInterval,
   isTaipeiTradingWindow,
 } from './format-taipei.js';
 
@@ -48,6 +49,45 @@ describe('format-taipei', () => {
       expect(isTaipeiTradingWindow(new Date('2026-09-05T10:00:00+08:00'))).toBe(false);
       // Sun 11:00
       expect(isTaipeiTradingWindow(new Date('2026-09-06T11:00:00+08:00'))).toBe(false);
+    });
+  });
+
+  describe('getMarketOverviewRefetchInterval', () => {
+    it('returns 30,000 ms during trading window', () => {
+      const intradayNow = new Date('2026-09-07T10:30:00+08:00');
+      expect(getMarketOverviewRefetchInterval(intradayNow)).toBe(30_000);
+    });
+
+    it('returns milliseconds until 08:55:00 on the same day when earlier in the morning', () => {
+      // Mon 08:54:50 -> 10s until 08:55:00 (+200ms grace = 10,200ms)
+      const morningNow = new Date('2026-09-07T08:54:50+08:00');
+      const interval = getMarketOverviewRefetchInterval(morningNow);
+      expect(interval).toBeGreaterThanOrEqual(10_000);
+      expect(interval).toBeLessThanOrEqual(10_500);
+    });
+
+    it('returns milliseconds until next day 08:55:00 when after 13:35 on Monday to Thursday', () => {
+      // Mon 14:00:00 -> until Tue 08:55:00 (18h 55m = 68,100,000 ms)
+      const afterHoursMon = new Date('2026-09-07T14:00:00+08:00');
+      const interval = getMarketOverviewRefetchInterval(afterHoursMon);
+      expect(interval).toBeGreaterThan(18 * 3600 * 1000);
+      expect(interval).toBeLessThan(19 * 3600 * 1000);
+    });
+
+    it('returns milliseconds until Monday 08:55:00 when after 13:35 on Friday', () => {
+      // Fri 14:00:00 -> until Mon 08:55:00 (66h 55m = 240,900,000 ms)
+      const afterHoursFri = new Date('2026-09-04T14:00:00+08:00');
+      const interval = getMarketOverviewRefetchInterval(afterHoursFri);
+      expect(interval).toBeGreaterThan(66 * 3600 * 1000);
+      expect(interval).toBeLessThan(67 * 3600 * 1000);
+    });
+
+    it('returns milliseconds until Monday 08:55:00 when on weekend', () => {
+      // Sat 10:00:00 -> until Mon 08:55:00 (46h 55m = 168,900,000 ms)
+      const weekendSat = new Date('2026-09-05T10:00:00+08:00');
+      const interval = getMarketOverviewRefetchInterval(weekendSat);
+      expect(interval).toBeGreaterThan(46 * 3600 * 1000);
+      expect(interval).toBeLessThan(47 * 3600 * 1000);
     });
   });
 });

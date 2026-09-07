@@ -39,33 +39,74 @@ export function formatTaipeiTime(iso: string): string {
   return `${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
-// Monday to Friday 08:55 ~ 13:35 in Asia/Taipei
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+export const ACTIVE_POLLING_INTERVAL_MS = 30_000;
+
+/**
+ * Checks if the given time falls into the regular weekday trading window
+ * (Monday to Friday 08:55:00 ~ 13:35:00 Asia/Taipei).
+ *
+ * Note: This represents the regular weekly market window and does not
+ * account for official TWSE national holiday closures or special trading days.
+ */
 export function isTaipeiTradingWindow(now = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: TAIPEI_TIME_ZONE,
-    weekday: 'short',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  }).formatToParts(now);
-
-  const byType: Record<string, string> = {};
-  for (const part of parts) {
-    byType[part.type] = part.value;
-  }
-
-  const day = byType.weekday;
-  if (day === 'Sat' || day === 'Sun') {
+  const taipeiDate = new Date(now.getTime() + TAIPEI_OFFSET_MS);
+  const weekday = taipeiDate.getUTCDay(); // 0: Sun, 1: Mon, ..., 6: Sat
+  if (weekday === 0 || weekday === 6) {
     return false;
   }
 
-  const hour = Number(byType.hour);
-  const minute = Number(byType.minute);
-  const totalMinutes = hour * 60 + minute;
+  const hour = taipeiDate.getUTCHours();
+  const minute = taipeiDate.getUTCMinutes();
+  const second = taipeiDate.getUTCSeconds();
+  const totalSeconds = hour * 3600 + minute * 60 + second;
 
-  // 08:55 is 8 * 60 + 55 = 535
-  // 13:35 is 13 * 60 + 35 = 815
-  return totalMinutes >= 535 && totalMinutes <= 815;
+  // 08:55:00 is 8 * 3600 + 55 * 60 = 32100
+  // 13:35:00 is 13 * 3600 + 35 * 60 = 48900
+  return totalSeconds >= 32100 && totalSeconds <= 48900;
 }
 
+/**
+ * Calculates the next refetch interval for market overview.
+ * - During trading window (Mon-Fri 08:55 ~ 13:35): returns 30,000 ms.
+ * - Outside trading window: returns the delay until the next 08:55:00 trading window wake-up.
+ *   This ensures long-lived open tabs automatically wake up and begin active polling at 08:55.
+ */
+export function getMarketOverviewRefetchInterval(now = new Date()): number {
+  if (isTaipeiTradingWindow(now)) {
+    return ACTIVE_POLLING_INTERVAL_MS;
+  }
 
+  const nowMs = now.getTime();
+  const taipeiDate = new Date(nowMs + TAIPEI_OFFSET_MS);
+  const year = taipeiDate.getUTCFullYear();
+  const month = taipeiDate.getUTCMonth();
+  const date = taipeiDate.getUTCDate();
+  const weekday = taipeiDate.getUTCDay(); // 0: Sun, 1: Mon, ..., 6: Sat
+
+  let daysUntilNext: number;
+  const todayStartMs = Date.UTC(year, month, date, 8, 55, 0, 0) - TAIPEI_OFFSET_MS;
+
+  if (weekday >= 1 && weekday <= 5) {
+    if (nowMs < todayStartMs) {
+      // Earlier today before 08:55
+      daysUntilNext = 0;
+    } else if (weekday === 5) {
+      // Friday after 13:35 -> next is Monday (+3 days)
+      daysUntilNext = 3;
+    } else {
+      // Monday to Thursday after 13:35 -> next is tomorrow (+1 day)
+      daysUntilNext = 1;
+    }
+  } else if (weekday === 6) {
+    // Saturday -> next is Monday (+2 days)
+    daysUntilNext = 2;
+  } else {
+    // Sunday (0) -> next is Monday (+1 day)
+    daysUntilNext = 1;
+  }
+
+  const targetDate = new Date(Date.UTC(year, month, date + daysUntilNext, 8, 55, 0, 0) - TAIPEI_OFFSET_MS);
+  const diffMs = targetDate.getTime() - nowMs;
+  return Math.max(1000, diffMs + 200);
+}

@@ -77,7 +77,7 @@ describe('MarketOverviewService', () => {
   });
 
   describe('classifyIndexState', () => {
-    it('classifies as intraday when on today and 09:00:00 <= time < 13:30:00', () => {
+    it('classifies as intraday when on today and 09:00:00 <= time < 13:35:00', () => {
       const now = new Date('2026-09-07T10:30:00+08:00');
       const candidate: RawMisIndexCandidate = {
         symbol: 't00',
@@ -101,7 +101,24 @@ describe('MarketOverviewService', () => {
       });
     });
 
-    it('classifies as closed at 14:14 batch-gap after 13:30:00', () => {
+    it('classifies as intraday during delayed closing settlement grace period (e.g. 13:33:00)', () => {
+      const now = new Date('2026-09-07T13:33:00+08:00');
+      const candidate: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 47320.0,
+        change: 768.87,
+        changePercent: 1.65,
+        tradeDate: '2026-09-07',
+        time: '13:33:00',
+        asOf: '2026-09-07T13:33:00+08:00',
+      };
+
+      const result = classifyIndexState(candidate, now);
+      expect(result.state).toBe('intraday');
+      expect(result.asOf).toBe('2026-09-07T13:33:00+08:00');
+    });
+
+    it('classifies as closed after 13:35:00 settlement window (e.g. 13:36:00 and 14:14 batch-gap)', () => {
       const now = new Date('2026-09-07T14:14:00+08:00');
       const candidate: RawMisIndexCandidate = {
         symbol: 't00',
@@ -109,8 +126,8 @@ describe('MarketOverviewService', () => {
         change: 775.14,
         changePercent: 1.67,
         tradeDate: '2026-09-07',
-        time: '13:33:00',
-        asOf: '2026-09-07T13:33:00+08:00',
+        time: '13:35:30',
+        asOf: '2026-09-07T13:35:30+08:00',
       };
 
       const result = classifyIndexState(candidate, now);
