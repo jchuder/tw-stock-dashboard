@@ -41,7 +41,7 @@ COPY --from=api-files /opt/api ./
 USER node
 EXPOSE 3001
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "--experimental-loader=@opentelemetry/instrumentation/hook.mjs", "--import", "./otel-register.mjs", "dist/main.js"]
 
 FROM nginx:1.29-alpine AS web
 
