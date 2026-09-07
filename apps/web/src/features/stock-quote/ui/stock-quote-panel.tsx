@@ -10,6 +10,7 @@ const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugl
 const MARKET_LABELS = {
   TWSE: '上市',
   TPEX: '上櫃',
+  ESB: '興櫃',
 } as const;
 
 const COLOR_UP = '#d94b45';

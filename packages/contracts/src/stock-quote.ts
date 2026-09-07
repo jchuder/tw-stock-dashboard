@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 
-export const MarketSchema = Schema.Literal('TWSE', 'TPEX');
+export const MarketSchema = Schema.Literal('TWSE', 'TPEX', 'ESB');
 export type Market = Schema.Schema.Type<typeof MarketSchema>;
 
 // Pure market-data payload. No provenance here — source metadata joins at the
