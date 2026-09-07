@@ -33,6 +33,20 @@ export function indexWatchlistSecurities(
   return Object.fromEntries(items.map((item) => [item.symbol, item]));
 }
 
+export function buildWatchlistItems(
+  symbols: readonly string[],
+  securities: Readonly<Record<string, Security>>,
+): WatchlistDisplayItem[] {
+  return symbols.map((symbol) => {
+    const security = securities[symbol];
+    return {
+      symbol,
+      name: security?.name ?? '—',
+      market: security?.market ?? null,
+    };
+  });
+}
+
 export function hasRetryableWatchlistQuotes(items: readonly StockQuoteBatchItem[]): boolean {
   return items.some((item) => item.error === 'failed' || item.error === 'unavailable');
 }
@@ -101,14 +115,7 @@ export function StockAnalysis({
     retry: false,
   });
   const watchlistSecurities = indexWatchlistSecurities(watchlistSecurityQuery.data ?? []);
-  const watchlistItems: WatchlistDisplayItem[] = watchlistSymbols.map((symbol) => {
-    const security = watchlistSecurities[symbol];
-    return {
-      symbol,
-      name: security?.name ?? symbol,
-      market: security?.market ?? null,
-    };
-  });
+  const watchlistItems = buildWatchlistItems(watchlistSymbols, watchlistSecurities);
   const [validatedStock, setValidatedStock] = useState<{ symbol: string; name: string } | null>(
     null,
   );

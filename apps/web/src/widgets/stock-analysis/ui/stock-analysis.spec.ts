@@ -1,6 +1,7 @@
 import type { Security, StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
 import { describe, expect, it } from 'vitest';
 import {
+  buildWatchlistItems,
   hasRetryableWatchlistQuotes,
   indexWatchlistQuotes,
   indexWatchlistSecurities,
@@ -55,6 +56,12 @@ describe('quote history capability', () => {
 
     expect(indexed['2330']).toEqual(items[0]);
     expect(indexed['7883']).toEqual(items[1]);
+  });
+
+  it('uses em dashes when saved symbols have no metadata', () => {
+    expect(buildWatchlistItems(['999999'], {})).toEqual([
+      { symbol: '999999', name: '—', market: null },
+    ]);
   });
 
   it('exposes retry for failed batches but not permanent not-found symbols', () => {
