@@ -48,6 +48,19 @@ const FUGLE_BODY = {
 };
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
+const OFFICIAL_TWSE_BODY = [
+  {
+    Date: '1150904',
+    Code: '2330',
+    Name: '台積電',
+    TradeVolume: '14102018',
+    OpeningPrice: '2415.00',
+    HighestPrice: '2415.00',
+    LowestPrice: '2390.00',
+    ClosingPrice: '2410.00',
+    Change: '20.0000',
+  },
+];
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
@@ -201,8 +214,17 @@ describe('stock quote domain logs', () => {
     ]);
   });
 
-  it('logs fallback event at info level when FUGLE_API_KEY is missing', async () => {
-    vi.stubGlobal('fetch', vi.fn(serveUniverseFirst(async () => jsonResponse(MIS_BODY))));
+  it('logs an official fallback event at info level when FUGLE_API_KEY is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        serveUniverseFirst(async (input: unknown) =>
+          String(input).includes('openapi.twse.com.tw')
+            ? jsonResponse(OFFICIAL_TWSE_BODY)
+            : jsonResponse(MIS_BODY),
+        ),
+      ),
+    );
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
@@ -212,7 +234,7 @@ describe('stock quote domain logs', () => {
         operation: 'quote',
         symbol: '2330',
         from_provider: 'fugle',
-        to_provider: 'twse-mis',
+        to_provider: 'twse-openapi',
         fallback_reason: 'config_missing',
         reason: 'config_missing',
       },

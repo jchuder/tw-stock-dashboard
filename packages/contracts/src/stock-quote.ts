@@ -40,8 +40,11 @@ export const StockQuoteSchema = Schema.Struct({
 });
 export type StockQuote = Schema.Schema.Type<typeof StockQuoteSchema>;
 
+export const StockQuoteProviderSchema = Schema.Literal('fugle', 'twse-mis', 'twse-openapi', 'tpex-openapi', 'tpex-esb');
+export type StockQuoteProvider = Schema.Schema.Type<typeof StockQuoteProviderSchema>;
+
 export const StockQuoteSourceSchema = Schema.Struct({
-  provider: Schema.Literal('fugle', 'twse-mis', 'tpex-esb'),
+  provider: StockQuoteProviderSchema,
   fallbackUsed: Schema.Boolean,
   fallbackReason: Schema.NullOr(
     Schema.Literal('config_missing', 'upstream_unavailable'),

@@ -7,12 +7,12 @@ import { CacheService } from '../../libs/cache/cache.service.js';
 import type { PinoLogger } from 'nestjs-pino';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import { OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteController } from './stock-quote.controller.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
-
 vi.mock('../../libs/observability/tracing.js', () => ({
   addSpanEvent: vi.fn(),
   setSpanAttributes: vi.fn(),
@@ -26,6 +26,7 @@ function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
+    new OfficialDailyQuoteProvider(new CacheService()),
     new TpexEsbQuoteProvider(new CacheService()),
     new StockQuoteCache(),
     fakeUniverse(),

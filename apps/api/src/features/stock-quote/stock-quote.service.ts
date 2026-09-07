@@ -1,9 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Clock, Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
-import type { StockQuoteBatchItem, StockQuoteBatchResponse, StockQuoteResponse } from '@tw-stock-dashboard/contracts';
+import type {
+  StockQuoteBatchItem,
+  StockQuoteBatchResponse,
+  StockQuoteProvider,
+  StockQuoteResponse,
+} from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import { OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
+import type { OfficialDailyQuoteError } from './official-daily-quote.error.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import type { QuoteProviderResult } from './quote-provider.js';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
@@ -18,12 +25,13 @@ import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 type StockQuoteFailure =
   | FugleQuoteError
   | TwseMisQuoteError
+  | OfficialDailyQuoteError
   | TpexEsbQuoteError
   | StockNotFoundError
   | UniverseUnavailableError;
 
-// Application seam: TTL cache in front of the Fugle primary / TWSE MIS
-// fallback workflow, and the single place that assembles source metadata.
+// Application seam: TTL cache in front of Fugle, TWSE MIS, and official daily
+// fallback workflows, with source metadata assembled in one place.
 // Only normalized successes are cached — failures skip the write and the next
 // request retries upstream. Lookup runs before any provider, so a cached quote
 // is served even if the key was removed afterwards, until TTL.
@@ -36,6 +44,7 @@ export class StockQuoteService {
   constructor(
     @Inject(FugleQuoteProvider) private readonly fugleQuoteProvider: FugleQuoteProvider,
     @Inject(TwseMisQuoteProvider) private readonly twseMisQuoteProvider: TwseMisQuoteProvider,
+    @Inject(OfficialDailyQuoteProvider) private readonly officialDailyQuoteProvider: OfficialDailyQuoteProvider,
     @Inject(TpexEsbQuoteProvider) private readonly tpexEsbQuoteProvider: TpexEsbQuoteProvider,
     @Inject(StockQuoteCache) private readonly cache: StockQuoteCache,
     @Inject(UniverseResolver) private readonly universe: UniverseResolver,
@@ -90,11 +99,11 @@ export class StockQuoteService {
             error,
           ): Effect.Effect<
             QuoteProviderResult & {
-              readonly provider: 'twse-mis';
+              readonly provider: StockQuoteProvider;
               readonly fallbackUsed: true;
               readonly fallbackReason: 'config_missing' | 'upstream_unavailable';
             },
-            FugleQuoteError | TwseMisQuoteError | StockNotFoundError
+            FugleQuoteError | TwseMisQuoteError | OfficialDailyQuoteError | StockNotFoundError
           > => {
             if (error._tag === 'FugleHttpError' && error.status === 404) {
               return Effect.fail(new StockNotFoundError());
@@ -102,38 +111,64 @@ export class StockQuoteService {
             if (!isFugleFallbackEligible(error)) {
               return Effect.fail(error);
             }
-            const reasonType =
-              error._tag === 'FugleConfigError'
-                ? ('config_missing' as const)
-                : ('upstream_unavailable' as const);
+
+            if (error._tag === 'FugleConfigError') {
+              const officialMarket =
+                security.market === 'TWSE' || security.market === 'TPEX' ? security.market : null;
+              if (officialMarket === null) {
+                return Effect.fail(error);
+              }
+              const fallback = fallbackReason(error);
+              const toProvider = officialDailyProvider(officialMarket);
+              const logPayload = {
+                event: 'market_data_fallback',
+                operation: 'quote',
+                symbol,
+                from_provider: 'fugle',
+                to_provider: toProvider,
+                fallback_reason: 'config_missing' as const,
+                ...fallback,
+              };
+              this.logger.info(logPayload);
+              addSpanEvent('market_data.fallback', {
+                'stock.symbol': symbol,
+                'market_data.from_provider': 'fugle',
+                'market_data.to_provider': toProvider,
+                'market_data.reason': fallback.reason,
+                'market_data.reason_type': 'config_missing',
+              });
+              return Effect.map(this.officialDailyQuoteProvider.getQuote(symbol, officialMarket), (result) => ({
+                ...result,
+                provider: toProvider,
+                fallbackUsed: true,
+                fallbackReason: 'config_missing' as const,
+              }));
+            }
+
             const fallback = fallbackReason(error);
             const logPayload = {
               event: 'market_data_fallback',
               operation: 'quote',
               symbol,
               from_provider: 'fugle',
-              to_provider: 'twse-mis',
-              fallback_reason: reasonType,
+              to_provider: 'twse-mis' as const,
+              fallback_reason: 'upstream_unavailable' as const,
               ...fallback,
             };
-            if (reasonType === 'config_missing') {
-              this.logger.info(logPayload);
-            } else {
-              this.logger.warn(logPayload);
-            }
+            this.logger.warn(logPayload);
             addSpanEvent('market_data.fallback', {
               'stock.symbol': symbol,
               'market_data.from_provider': 'fugle',
               'market_data.to_provider': 'twse-mis',
               'market_data.reason': fallback.reason,
-              'market_data.reason_type': reasonType,
+              'market_data.reason_type': 'upstream_unavailable',
               ...('upstream_status' in fallback ? { 'market_data.upstream_status': fallback.upstream_status } : {}),
             });
             return Effect.map(this.twseMisQuoteProvider.getQuote(symbol), (result) => ({
               ...result,
-              provider: 'twse-mis',
+              provider: 'twse-mis' as const,
               fallbackUsed: true,
-              fallbackReason: reasonType,
+              fallbackReason: 'upstream_unavailable' as const,
             }));
           },
         ),
@@ -166,7 +201,7 @@ export class StockQuoteService {
   private assemble(
     symbol: string,
     completed: QuoteProviderResult & {
-      readonly provider: 'fugle' | 'twse-mis' | 'tpex-esb';
+      readonly provider: StockQuoteProvider;
       readonly fallbackUsed: boolean;
       readonly fallbackReason: 'config_missing' | 'upstream_unavailable' | null;
     },
@@ -213,8 +248,8 @@ function batchError(error: StockQuoteFailure): NonNullable<StockQuoteBatchItem['
 }
 
 // Feature-local eligibility: transient/provider failures (including timeout)
-// and missing configuration fall back to TWSE MIS. Invalid key (401/403) or
-// client errors (404) do not fall back.
+// and missing configuration use an official market-data fallback. Invalid key
+// (401/403) or client errors (404) do not fall back.
 export function isFugleFallbackEligible(error: FugleQuoteError): boolean {
   switch (error._tag) {
     case 'FugleConfigError':
@@ -249,7 +284,10 @@ function fallbackReason(error: FugleQuoteError): FallbackReason {
   }
 }
 
-function servedSpanAttributes(provider: 'fugle' | 'twse-mis' | 'tpex-esb', fallbackUsed: boolean, cacheHit: boolean) {
+function officialDailyProvider(market: 'TWSE' | 'TPEX'): Extract<StockQuoteProvider, 'twse-openapi' | 'tpex-openapi'> {
+  return market === 'TWSE' ? 'twse-openapi' : 'tpex-openapi';
+}
+function servedSpanAttributes(provider: StockQuoteProvider, fallbackUsed: boolean, cacheHit: boolean) {
   return {
     'market_data.provider': provider,
     'market_data.fallback_used': fallbackUsed,

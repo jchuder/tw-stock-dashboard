@@ -6,6 +6,8 @@ import type { Security, StockQuoteResponse } from '@tw-stock-dashboard/contracts
 import { CacheService } from '../../libs/cache/cache.service.js';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import type { OfficialDailyQuoteError } from './official-daily-quote.error.js';
+import { OfficialDailyQuoteProvider, TWSE_DAILY_QUOTE_URL } from './official-daily-quote.provider.js';
 import { StockNotFoundError } from '../../libs/securities/universe.error.js';
 import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 import type { UniverseResolver } from '../../libs/securities/universe.resolver.js';
@@ -17,6 +19,19 @@ import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
+const OFFICIAL_TWSE_BODY = [
+  {
+    Date: '1150904',
+    Code: '2330',
+    Name: '台積電',
+    TradeVolume: '14102018',
+    OpeningPrice: '2415.00',
+    HighestPrice: '2415.00',
+    LowestPrice: '2390.00',
+    ClosingPrice: '2410.00',
+    Change: '20.0000',
+  },
+];
 
 const FUGLE_BODY = {
   symbol: '2330',
@@ -46,14 +61,18 @@ const EXPECTED_QUOTE = {
   limitUpPrice: null,
   limitDownPrice: null,
 };
-
 type QuoteResult = Either.Either<
   StockQuoteResponse,
-  FugleQuoteError | TwseMisQuoteError | TpexEsbQuoteError | StockNotFoundError | UniverseUnavailableError
+  FugleQuoteError |
+    TwseMisQuoteError |
+    OfficialDailyQuoteError |
+    TpexEsbQuoteError |
+    StockNotFoundError |
+    UniverseUnavailableError
 >;
 
 interface ExpectedSource {
-  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
+  provider: 'fugle' | 'twse-mis' | 'twse-openapi' | 'tpex-openapi' | 'tpex-esb';
   fallbackUsed: boolean;
   cacheHit: boolean;
   asOf: string | null;
@@ -77,6 +96,7 @@ function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
+    new OfficialDailyQuoteProvider(new CacheService()),
     new TpexEsbQuoteProvider(new CacheService()),
     new StockQuoteCache(),
     fakeUniverse(),
@@ -333,6 +353,43 @@ describe('StockQuoteService TTL cache', () => {
 });
 
 describe('StockQuoteService ticker fallback policy', () => {
+
+  it('uses official daily data directly when Fugle is not configured', async () => {
+    vi.stubEnv('FUGLE_API_KEY', '');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input) === TWSE_DAILY_QUOTE_URL) {
+        return new Response(JSON.stringify(OFFICIAL_TWSE_BODY), { status: 200 });
+      }
+      throw new Error(`unexpected upstream call: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('2330')));
+
+    expectRightQuote(
+      result,
+      {
+        ...EXPECTED_QUOTE,
+        price: 2410,
+        referencePrice: 2390,
+        change: 20,
+        changePercent: 0.84,
+        tradeDate: '2026-09-04',
+        openPrice: 2415,
+        highPrice: 2415,
+        lowPrice: 2390,
+        tradeVolume: 14102.018,
+      },
+      {
+        provider: 'twse-openapi',
+        fallbackUsed: true,
+        cacheHit: false,
+        asOf: null,
+      },
+    );
+    expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();

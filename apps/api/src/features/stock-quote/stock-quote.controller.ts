@@ -15,6 +15,7 @@ import type { StockQuoteBatchResponse, StockQuoteResponse } from '@tw-stock-dash
 import { StockQuoteService } from './stock-quote.service.js';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 
+import type { OfficialDailyQuoteError } from './official-daily-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { addSpanEvent } from '../../libs/observability/tracing.js';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
@@ -74,16 +75,20 @@ function parseSymbols(rawSymbols: string | undefined): string[] {
 
 function failedLog(
   symbol: string,
-  error: FugleQuoteError | TwseMisQuoteError | TpexEsbQuoteError | UniverseUnavailableError,
+  error: FugleQuoteError | TwseMisQuoteError | OfficialDailyQuoteError | TpexEsbQuoteError | UniverseUnavailableError,
 ) {
   const status = 'status' in error && typeof error.status === 'number' ? error.status : undefined;
   const provider = error._tag.startsWith('Fugle')
     ? 'fugle'
     : error._tag.startsWith('TpexEsb')
       ? 'tpex-esb'
-      : error._tag === 'UniverseUnavailableError'
-        ? 'universe'
-        : 'twse-mis';
+      : error._tag === 'OfficialDailyQuoteError'
+        ? error.market === 'TWSE'
+          ? 'twse-openapi'
+          : 'tpex-openapi'
+        : error._tag === 'UniverseUnavailableError'
+          ? 'universe'
+          : 'twse-mis';
   return {
     event: 'market_data_quote_failed',
     operation: 'quote',

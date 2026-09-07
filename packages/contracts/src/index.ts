@@ -7,6 +7,7 @@ export {
   StockQuoteBatchResponseSchema,
   StockQuoteResponseSchema,
   StockQuoteSchema,
+  StockQuoteProviderSchema,
   StockQuoteSourceSchema,
 } from './stock-quote.js';
 export type {
@@ -17,6 +18,7 @@ export type {
   StockQuoteBatchItem,
   StockQuoteBatchResponse,
   StockQuoteResponse,
+  StockQuoteProvider,
   StockQuoteSource,
 } from './stock-quote.js';
 export { CandleSchema, HistoryRangeSchema, PriceBasisSchema, StockHistoryResponseSchema, TimeframeSchema, VolumeUnitSchema } from './stock-history.js';

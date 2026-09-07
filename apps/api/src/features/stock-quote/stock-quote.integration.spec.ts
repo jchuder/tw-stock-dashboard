@@ -9,6 +9,7 @@ import { CacheModule } from '../../libs/cache/cache.module.js';
 import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { UniverseModule } from '../../libs/securities/universe.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
+import { TPEX_DAILY_QUOTE_URL, TWSE_DAILY_QUOTE_URL } from './official-daily-quote.provider.js';
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
   return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
 }
@@ -51,7 +52,7 @@ const GENERIC_FAILURE = {
 };
 
 interface ExpectedSource {
-  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
+  provider: 'fugle' | 'twse-mis' | 'twse-openapi' | 'tpex-openapi' | 'tpex-esb';
   fallbackUsed: boolean;
   fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
   cacheHit: boolean;
@@ -83,15 +84,50 @@ const MIS_FIXTURE = {
   msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }],
 };
 
-// Route-aware upstream stub: Fugle and TWSE MIS get independent behaviors so
-// the fallback matrix can assert both the response and who was (not) called.
-// Responses are cloned per call: the provider fetches quote + ticker, and a
-// consumed body cannot be read twice.
+const OFFICIAL_TWSE_FIXTURE = [
+  {
+    Date: '1150904',
+    Code: '2330',
+    Name: '台積電',
+    TradeVolume: '14102018',
+    OpeningPrice: '2415.00',
+    HighestPrice: '2415.00',
+    LowestPrice: '2390.00',
+    ClosingPrice: '2410.00',
+    Change: '20.0000',
+  },
+];
+
+const OFFICIAL_TPEX_FIXTURE = [
+  {
+    Date: '1150907',
+    SecuritiesCompanyCode: '006201',
+    CompanyName: '元大富櫃50',
+    TradingShares: '137950',
+    Open: '44.98',
+    High: '45.82',
+    Low: '44.98',
+    Close: '45.41',
+    Change: '+1.23',
+  },
+];
+
+// Route-aware upstream stub: Fugle, TWSE MIS, and official daily endpoints
+// keep independent behaviors so the fallback matrix can assert routing.
+// Responses are cloned per call: the Fugle provider fetches two endpoints and
+// the snapshot providers may serve multiple symbols from one payload.
 function mockUpstreams(fugle: Response | Error, mis: Response | Error | null) {
   const fetchMock = vi.fn(async (input: unknown) => {
-    const universe = universeFixtureResponse(String(input));
+    const url = String(input);
+    const universe = universeFixtureResponse(url);
     if (universe) return universe;
-    const picked = String(input).includes('api.fugle.tw') ? fugle : mis;
+    const picked = url.includes('api.fugle.tw')
+      ? fugle
+      : url.includes(TWSE_DAILY_QUOTE_URL)
+        ? jsonResponse(OFFICIAL_TWSE_FIXTURE)
+        : url.includes(TPEX_DAILY_QUOTE_URL)
+          ? jsonResponse(OFFICIAL_TPEX_FIXTURE)
+          : mis;
     if (picked === null || picked instanceof Error) {
       throw picked ?? new Error('unexpected upstream call');
     }
@@ -160,16 +196,29 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     );
   });
 
-  it('falls back to TWSE MIS when FUGLE_API_KEY is missing', async () => {
+  it('uses the official daily snapshot when FUGLE_API_KEY is missing', async () => {
     const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
 
     const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
     expectQuoteBody(
       res.body,
-      EXPECTED_QUOTE,
       {
-        provider: 'twse-mis',
+        ...EXPECTED_QUOTE,
+        price: 2410,
+        referencePrice: 2390,
+        change: 20,
+        changePercent: 0.84,
+        tradeDate: '2026-09-04',
+        openPrice: 2415,
+        highPrice: 2415,
+        lowPrice: 2390,
+        tradeVolume: 14102.018,
+        limitUpPrice: null,
+        limitDownPrice: null,
+      },
+      {
+        provider: 'twse-openapi',
         fallbackUsed: true,
         fallbackReason: 'config_missing',
         cacheHit: false,
@@ -177,10 +226,40 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       },
     );
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
   });
 
-  it('fails safe without leaking when FUGLE_API_KEY is missing and MIS also fails', async () => {
+  it('uses the TPEx daily snapshot for TPEX quotes without a key', async () => {
+    const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/006201/quote').expect(200);
+
+    expect(res.body).toMatchObject({
+      symbol: '006201',
+      name: '元大富櫃50',
+      market: 'TPEX',
+      price: 45.41,
+      referencePrice: 44.18,
+      change: 1.23,
+      changePercent: 2.78,
+      tradeDate: '2026-09-07',
+      tradeVolume: 137.95,
+      tradeVolumeUnit: 'lot',
+      source: {
+        provider: 'tpex-openapi',
+        fallbackUsed: true,
+        fallbackReason: 'config_missing',
+        cacheHit: false,
+        asOf: null,
+      },
+    });
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, TPEX_DAILY_QUOTE_URL)).toBe(1);
+  });
+
+  it('fails safe without leaking when the official daily snapshot fails', async () => {
     const fetchMock = vi.fn(serveUniverseFirst(async () => new Response('error', { status: 500 })));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -317,13 +396,14 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
-  it('does not call Fugle upstream when FUGLE_API_KEY is missing', async () => {
+  it('uses official daily data instead of Fugle or MIS when the key is missing', async () => {
     const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
   });
 
   it('serves the second sequential GET from cache with one upstream round', async () => {
