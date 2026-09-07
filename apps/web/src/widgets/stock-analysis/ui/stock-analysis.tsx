@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import type { HistoryRange, Market, Security, StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
+import type { HistoryRange, Market, Security, StockQuoteBatchItem, StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { fetchSecurities } from '../../../entities/security/index.js';
 import { StockHistoryFocus, StockHistoryTable } from '../../../features/stock-history/index.js';
 import type { MaVisibility } from '../../../features/stock-history/ui/stock-history-chart.js';
@@ -86,7 +86,7 @@ export function StockAnalysis({
   onSymbolSubmitted: (symbol: string) => void;
   onProvenance?: (
     provenance: {
-      provider: 'fugle' | 'twse-mis' | 'tpex-esb';
+      provider: StockQuoteProvider;
       asOf: string | null;
       fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
     } | null,
@@ -212,7 +212,7 @@ export function StockAnalysis({
               <span className="public-data-banner-text">
                 {validatedMarket === 'ESB'
                   ? '報價來自 TPEx 興櫃官方公開資料；目前提供官方日均價歷史走勢，暫不提供 5 分 K。'
-                  : '報價來自 TWSE MIS，歷史 K 線來自交易所官方盤後日線。如需即時 5 分 K 與高頻盤中走勢，請設定 Fugle API Key。'}
+                  : '報價來自 TWSE / TPEx 官方盤後日線；歷史 K 線同樣使用交易所官方盤後日線。如需即時 5 分 K 與高頻盤中走勢，請設定 Fugle API Key。'}
               </span>
             </div>
           )}

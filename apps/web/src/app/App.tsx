@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { JSX } from 'react';
+import type { StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { Toaster } from 'sonner';
 import { MarketOverviewPanel } from '../features/market-overview/index.js';
 import { GlobalStockSearch } from '../features/stock-quote/index.js';
@@ -9,16 +10,18 @@ import { formatTaipeiDateTime } from '../shared/datetime/format-taipei.js';
 import './app.css';
 
 export interface QuoteProvenance {
-  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
+  provider: StockQuoteProvider;
   asOf: string | null;
   fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
 }
 
-const PROVIDER_LABELS = {
+const PROVIDER_LABELS: Record<StockQuoteProvider, string> = {
   fugle: 'Fugle API',
   'twse-mis': 'TWSE MIS',
+  'twse-openapi': 'TWSE OpenAPI',
+  'tpex-openapi': 'TPEx OpenAPI',
   'tpex-esb': 'TPEX ESB',
-} as const;
+};
 
 export function App(): JSX.Element {
   // Boot focus: the first default watchlist symbol is queried immediately so
@@ -54,7 +57,7 @@ export function App(): JSX.Element {
               {provenance === null
                 ? '—'
                 : provenance.fallbackReason === 'config_missing'
-                  ? 'TWSE MIS（公開資料模式）'
+                  ? `${PROVIDER_LABELS[provenance.provider]}（公開資料模式）`
                   : PROVIDER_LABELS[provenance.provider]}
             </div>
             <div>

@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import type { Market } from '@tw-stock-dashboard/contracts';
+import type { Market, StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { toast } from 'sonner';
 import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.js';
 
-const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
+const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至備援資料來源';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
 
 const MARKET_LABELS = {
@@ -26,6 +26,9 @@ function formatReference(referencePrice: number | null, referencePriceType: 'pre
 const COLOR_UP = '#d94b45';
 const COLOR_DOWN = '#169a52';
 const COLOR_FLAT = '#59605c';
+function isOfficialFallbackProvider(provider: StockQuoteProvider): boolean {
+  return provider === 'twse-mis' || provider === 'twse-openapi' || provider === 'tpex-openapi';
+}
 
 function changeClass(value: number | null): string {
   if (value === null) return 'price-neutral';
@@ -42,7 +45,7 @@ function formatNullable(value: number | null): string {
 }
 
 export interface QuoteResolvedInfo {
-  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
+  provider: StockQuoteProvider;
   asOf: string | null;
   fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
   fallbackUsed: boolean;
@@ -64,7 +67,7 @@ export function StockQuotePanel({
   isInWatchlist?: boolean;
   onToggleWatchlist?: () => void;
 }): JSX.Element {
-  const previousProvider = useRef<'fugle' | 'twse-mis' | 'tpex-esb' | null>(null);
+  const previousProvider = useRef<StockQuoteProvider | null>(null);
 
   const quote = useQuery({
     queryKey: ['stock-quote', requestedSymbol, searchSeq],
@@ -102,13 +105,15 @@ export function StockQuotePanel({
     }
     const current = data.source.provider;
     const previous = previousProvider.current;
-    if (previous === null && current === 'twse-mis' && data.source.fallbackUsed) {
+    const currentIsFallback = isOfficialFallbackProvider(current);
+    const previousWasFallback = previous !== null && isOfficialFallbackProvider(previous);
+    if (previous === null && currentIsFallback && data.source.fallbackUsed) {
       if (data.source.fallbackReason !== 'config_missing') {
         toast(FALLBACK_TOAST, { duration: 5000 });
       }
-    } else if (previous === 'fugle' && current === 'twse-mis') {
+    } else if (previous === 'fugle' && currentIsFallback) {
       toast(FALLBACK_TOAST, { duration: 5000 });
-    } else if (previous === 'twse-mis' && current === 'fugle') {
+    } else if (previousWasFallback && current === 'fugle') {
       toast(RECOVERY_TOAST, { duration: 5000 });
     }
     previousProvider.current = current;

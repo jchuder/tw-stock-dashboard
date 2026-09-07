@@ -51,7 +51,28 @@ const MIS_BODY = {
   },
 };
 
-const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
+const OFFICIAL_PUBLIC_TWSE_BODY = {
+  ...MIS_BODY,
+  price: 2410,
+  referencePrice: 2390,
+  change: 20,
+  changePercent: 0.84,
+  tradeDate: '2026-09-04',
+  openPrice: 2415,
+  highPrice: 2415,
+  lowPrice: 2390,
+  tradeVolume: 14102.018,
+  source: {
+    provider: 'twse-openapi',
+    fallbackUsed: true,
+    fallbackReason: 'config_missing',
+    fetchedAt: '2026-09-06T03:45:06.000Z',
+    asOf: null,
+    cacheHit: false,
+  },
+};
+
+const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至備援資料來源';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
 
 test.beforeEach(async ({ page }) => {
@@ -230,17 +251,7 @@ test('public data mode shows persistent banner, disables 5m candles, and updates
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({
-        ...MIS_BODY,
-        source: {
-          provider: 'twse-mis',
-          fallbackUsed: true,
-          fallbackReason: 'config_missing',
-          fetchedAt: '2026-09-06T03:45:06.000Z',
-          asOf: '2026-09-04T05:30:00.000Z',
-          cacheHit: false,
-        },
-      }),
+      body: JSON.stringify(OFFICIAL_PUBLIC_TWSE_BODY),
     });
   });
 
@@ -281,14 +292,14 @@ test('public data mode shows persistent banner, disables 5m candles, and updates
 
   await page.goto('/');
 
-  // 1. Header displays TWSE MIS（公開資料模式）
-  await expect(page.getByText('資料來源：TWSE MIS（公開資料模式）').first()).toBeVisible();
+  // 1. Header displays TWSE OpenAPI（公開資料模式）
+  await expect(page.getByText('資料來源：TWSE OpenAPI（公開資料模式）').first()).toBeVisible();
 
   // 2. Persistent amber banner is visible
   const banner = page.getByTestId('public-data-banner');
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('公開資料模式');
-  await expect(banner).toContainText('報價來自 TWSE MIS，歷史 K 線來自交易所官方盤後日線');
+  await expect(banner).toContainText('報價來自 TWSE / TPEx 官方盤後日線');
 
   // 3. Fallback toast should NOT be shown
   await expect(page.getByText(FALLBACK_TOAST)).not.toBeVisible();
