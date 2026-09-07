@@ -182,3 +182,20 @@ function formatDate(date: YearMonthDay): string {
   const day = String(date.day).padStart(2, '0');
   return `${date.year}-${month}-${day}`;
 }
+
+export function enumerateMonths(from: string, to: string): string[] {
+  const [startYear, startMonth] = from.split('-').map((part) => Number(part));
+  const [endYear, endMonth] = to.split('-').map((part) => Number(part));
+  const months: string[] = [];
+  let y = startYear;
+  let m = startMonth;
+  while (y < endYear || (y === endYear && m <= endMonth)) {
+    months.push(`${y}${String(m).padStart(2, '0')}`);
+    m++;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return months;
+}

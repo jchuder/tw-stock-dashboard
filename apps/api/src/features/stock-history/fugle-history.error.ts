@@ -14,9 +14,27 @@ export class FugleHistoryHttpError extends Data.TaggedError('FugleHistoryHttpErr
 
 export class FugleHistoryDecodeError extends Data.TaggedError('FugleHistoryDecodeError') {}
 
+export class OfficialDailyHistoryError extends Data.TaggedError('OfficialDailyHistoryError')<{
+  readonly cause?: unknown;
+}> {}
+
+export class StockHistoryNotFoundError extends Data.TaggedError('StockHistoryNotFoundError')<{
+  readonly symbol: string;
+}> {}
+
+export class IntradayRangeUnavailableError extends Data.TaggedError('IntradayRangeUnavailableError')<{
+  readonly reason: 'fugle-api-key' | 'esb-official-daily';
+}> {}
+
 export type FugleHistoryError =
   | FugleHistoryConfigError
   | FugleHistoryNetworkError
   | FugleHistoryTimeoutError
   | FugleHistoryHttpError
   | FugleHistoryDecodeError;
+
+export type StockHistoryServiceError =
+  | FugleHistoryError
+  | OfficialDailyHistoryError
+  | StockHistoryNotFoundError
+  | IntradayRangeUnavailableError;

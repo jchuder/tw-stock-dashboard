@@ -10,8 +10,6 @@ export {
   StockQuoteProviderSchema,
   StockQuoteSourceSchema,
 } from './stock-quote.js';
-export { CandleSchema, HistoryRangeSchema, StockHistoryResponseSchema, TimeframeSchema, VolumeUnitSchema } from './stock-history.js';
-export type { Candle, HistoryRange, StockHistoryResponse, Timeframe, VolumeUnit } from './stock-history.js';
 export type {
   Market,
   ReferencePriceType,
@@ -23,6 +21,8 @@ export type {
   StockQuoteProvider,
   StockQuoteSource,
 } from './stock-quote.js';
+export { CandleSchema, HistoryRangeSchema, PriceBasisSchema, StockHistoryResponseSchema, TimeframeSchema, VolumeUnitSchema } from './stock-history.js';
+export type { Candle, HistoryRange, PriceBasis, StockHistoryResponse, Timeframe, VolumeUnit } from './stock-history.js';
 export { SecuritySchema, SecurityTypeSchema } from './security.js';
 export type { Security, SecurityType } from './security.js';
 export {
