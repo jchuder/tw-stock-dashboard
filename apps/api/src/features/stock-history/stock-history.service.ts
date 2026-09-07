@@ -112,7 +112,8 @@ export class StockHistoryService {
           Effect.catchAll((err) => {
             if (
               err._tag === 'FugleHistoryHttpError' &&
-              (err.status === 401 || err.status === 403 || err.status === 404)
+              err.status !== 429 &&
+              (err.status < 500 || err.status > 599)
             ) {
               return Effect.fail(err);
             }

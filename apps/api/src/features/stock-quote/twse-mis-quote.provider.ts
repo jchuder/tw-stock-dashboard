@@ -5,7 +5,13 @@ import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
 import { epochMsToIsoOrNull } from './timestamp.js';
 import { TwseMisDecodeError, TwseMisHttpError, TwseMisNetworkError, TwseMisTimeoutError } from './twse-mis-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
-import { TwseMisQuoteSchema, parseFiniteNumber, parseMisTradeDate, round2 } from './twse-mis-quote.schema.js';
+import {
+  TwseMisEntrySchema,
+  TwseMisQuoteSchema,
+  parseFiniteNumber,
+  parseMisTradeDate,
+  round2,
+} from './twse-mis-quote.schema.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 const TWSE_MIS_URL = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
@@ -38,10 +44,16 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
       const mis = yield* Schema.decodeUnknown(TwseMisQuoteSchema)(raw).pipe(
         Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })),
       );
-      const entry = mis.msgArray.find((item) => item.c === symbol);
-      if (!entry) {
+      const rawEntry = mis.msgArray.find(
+        (item): item is Record<string, unknown> =>
+          typeof item === 'object' && item !== null && (item as { c?: unknown }).c === symbol,
+      );
+      if (!rawEntry) {
         return yield* new TwseMisDecodeError({ stage: 'value' });
       }
+      const entry = yield* Schema.decodeUnknown(TwseMisEntrySchema)(rawEntry).pipe(
+        Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })),
+      );
 
       const price = parseFiniteNumber(entry.z);
       const previousClose = parseFiniteNumber(entry.y);

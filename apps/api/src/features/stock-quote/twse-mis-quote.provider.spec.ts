@@ -242,4 +242,21 @@ describe('TwseMisQuoteProvider typed failures', () => {
     }
     expect(signal?.aborted).toBe(true);
   });
+
+  it('successfully parses when msgArray contains dummy entries from unused exchange channels', async () => {
+    okOnce({
+      msgArray: [
+        TSE_ENTRY,
+        { tv: '-', s: '-', c: '', z: '-' },
+      ],
+    });
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.symbol).toBe('2330');
+      expect(result.right.quote.name).toBe('台積電');
+    }
+  });
 });

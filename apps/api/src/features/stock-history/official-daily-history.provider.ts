@@ -105,8 +105,7 @@ export class OfficialDailyHistoryProvider {
     }
 
     return Effect.gen(this, function* () {
-      const latestMonth = months[months.length - 1];
-      const isTwse = yield* this.checkTwseSymbol(symbol, latestMonth);
+      const isTwse = yield* this.isTwseSymbol(symbol, months);
 
       if (isTwse) {
         const chunkResults = yield* Effect.all(
@@ -125,7 +124,7 @@ export class OfficialDailyHistoryProvider {
         };
       }
 
-      const isTpex = yield* this.checkTpexSymbol(symbol, latestMonth);
+      const isTpex = yield* this.isTpexSymbol(symbol, months);
       if (isTpex) {
         const chunkResults = yield* Effect.all(
           months.map((m) => this.fetchTpexMonth(symbol, m)),
@@ -144,6 +143,28 @@ export class OfficialDailyHistoryProvider {
       }
 
       return yield* new StockHistoryNotFoundError({ symbol });
+    });
+  }
+
+  private isTwseSymbol(symbol: string, months: string[]): Effect.Effect<boolean, OfficialDailyHistoryError> {
+    const reversed = [...months].reverse().slice(0, 2);
+    return Effect.gen(this, function* () {
+      for (const m of reversed) {
+        const found = yield* this.checkTwseSymbol(symbol, m);
+        if (found) return true;
+      }
+      return false;
+    });
+  }
+
+  private isTpexSymbol(symbol: string, months: string[]): Effect.Effect<boolean, OfficialDailyHistoryError> {
+    const reversed = [...months].reverse().slice(0, 2);
+    return Effect.gen(this, function* () {
+      for (const m of reversed) {
+        const found = yield* this.checkTpexSymbol(symbol, m);
+        if (found) return true;
+      }
+      return false;
     });
   }
 
