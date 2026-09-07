@@ -3,6 +3,7 @@ import { Duration, Effect, Schema } from 'effect';
 import { TwseMisIndexError } from './market-overview.error.js';
 import {
   parseFiniteNumber,
+  parseHmsTime,
   parseYmdDate,
   TwseMisIndexResponseSchema,
 } from './market-overview.schema.js';
@@ -42,7 +43,7 @@ function tryParseCandidate(
     const change = Number((value - previousClose).toFixed(2));
     const changePercent = Number(((change / previousClose) * 100).toFixed(2));
     const tradeDate = parseYmdDate(item.d);
-    const time = item.t;
+    const time = parseHmsTime(item.t);
     const asOf = `${tradeDate}T${time}+08:00`;
 
     return {

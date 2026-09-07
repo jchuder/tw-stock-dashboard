@@ -21,8 +21,26 @@ export function parseYmdDate(dateStr: string): string {
   return `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
 }
 
+export function parseHmsTime(timeStr: string): string {
+  const trimmed = timeStr.trim();
+  const match = /^(\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
+  if (!match) {
+    throw new Error(`Invalid HMS time format: ${timeStr}`);
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3]);
+  if (hour > 23 || minute > 59 || second > 59) {
+    throw new Error(`Invalid HMS time values: ${timeStr}`);
+  }
+  return trimmed;
+}
+
 export function parseFiniteNumber(val: string): number {
   const sanitized = val.replace(/,/g, '').trim();
+  if (sanitized === '') {
+    throw new Error('Invalid finite number: empty string');
+  }
   const num = Number(sanitized);
   if (!Number.isFinite(num)) {
     throw new Error(`Invalid finite number: ${val}`);

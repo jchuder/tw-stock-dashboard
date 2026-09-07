@@ -177,6 +177,113 @@ describe('TwseMisIndexProvider', () => {
     }
   });
 
+  it('returns null candidate when time is malformed (e.g. non-format or 99:99:99)', async () => {
+    const mockPayload = {
+      msgArray: [
+        {
+          c: 't00',
+          n: '加權指數',
+          z: '47,326.27',
+          y: '46,551.13',
+          d: '20260907',
+          t: 'bad',
+        },
+        {
+          c: 'o00',
+          n: '櫃買指數',
+          z: '409.33',
+          y: '402.48',
+          d: '20260907',
+          t: '99:99:99',
+        },
+      ],
+      rtcode: '0000',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockPayload), { status: 200 }),
+    );
+
+    const result = await Effect.runPromise(Effect.either(provider.getIndices()));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.taiex).toBeNull();
+      expect(result.right.otc).toBeNull();
+    }
+  });
+
+  it('returns null for empty string numbers (z = "" or y = "") while allowing the valid peer candidate', async () => {
+    const mockPayload = {
+      msgArray: [
+        {
+          c: 't00',
+          n: '加權指數',
+          z: '',
+          y: '46,551.13',
+          d: '20260907',
+          t: '13:33:00',
+        },
+        {
+          c: 'o00',
+          n: '櫃買指數',
+          z: '409.33',
+          y: '402.48',
+          d: '20260907',
+          t: '13:33:00',
+        },
+      ],
+      rtcode: '0000',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockPayload), { status: 200 }),
+    );
+
+    const result = await Effect.runPromise(Effect.either(provider.getIndices()));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.taiex).toBeNull();
+      expect(result.right.otc).not.toBeNull();
+      expect(result.right.otc?.value).toBe(409.33);
+    }
+  });
+
+  it('returns null for empty previousClose (y = "") while allowing the valid peer candidate', async () => {
+    const mockPayload = {
+      msgArray: [
+        {
+          c: 't00',
+          n: '加權指數',
+          z: '47,326.27',
+          y: '',
+          d: '20260907',
+          t: '13:33:00',
+        },
+        {
+          c: 'o00',
+          n: '櫃買指數',
+          z: '409.33',
+          y: '402.48',
+          d: '20260907',
+          t: '13:33:00',
+        },
+      ],
+      rtcode: '0000',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockPayload), { status: 200 }),
+    );
+
+    const result = await Effect.runPromise(Effect.either(provider.getIndices()));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.taiex).toBeNull();
+      expect(result.right.otc).not.toBeNull();
+      expect(result.right.otc?.value).toBe(409.33);
+    }
+  });
+
   it('returns TwseMisIndexError on HTTP non-200 status', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response('Service Unavailable', { status: 503 }),
