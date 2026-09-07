@@ -57,3 +57,20 @@ export const StockQuoteResponseSchema = Schema.Struct({
   source: StockQuoteSourceSchema,
 });
 export type StockQuoteResponse = Schema.Schema.Type<typeof StockQuoteResponseSchema>;
+
+// Batch watchlist snapshots keep one client request bounded while preserving
+// per-symbol failure state. A failed symbol must not hide successful siblings.
+export const StockQuoteBatchErrorSchema = Schema.Literal('not_found', 'unavailable', 'failed');
+export type StockQuoteBatchError = Schema.Schema.Type<typeof StockQuoteBatchErrorSchema>;
+
+export const StockQuoteBatchItemSchema = Schema.Struct({
+  symbol: Schema.String,
+  quote: Schema.NullOr(StockQuoteResponseSchema),
+  error: Schema.NullOr(StockQuoteBatchErrorSchema),
+});
+export type StockQuoteBatchItem = Schema.Schema.Type<typeof StockQuoteBatchItemSchema>;
+
+export const StockQuoteBatchResponseSchema = Schema.Struct({
+  items: Schema.Array(StockQuoteBatchItemSchema),
+});
+export type StockQuoteBatchResponse = Schema.Schema.Type<typeof StockQuoteBatchResponseSchema>;

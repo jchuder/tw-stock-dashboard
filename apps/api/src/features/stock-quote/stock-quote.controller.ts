@@ -1,9 +1,20 @@
-import { Controller, Get, Inject, InternalServerErrorException, NotFoundException, Param, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Inject,
+  InternalServerErrorException,
+  NotFoundException,
+  Param,
+  Query,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
-import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
-import type { FugleQuoteError } from './fugle-quote.error.js';
+import type { StockQuoteBatchResponse, StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import { StockQuoteService } from './stock-quote.service.js';
+import type { FugleQuoteError } from './fugle-quote.error.js';
+
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { addSpanEvent } from '../../libs/observability/tracing.js';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
@@ -18,6 +29,12 @@ export class StockQuoteController {
     @Inject(StockQuoteService) private readonly stockQuoteService: StockQuoteService,
     @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {}
+
+  @Get('quotes')
+  async getQuotes(@Query('symbols') rawSymbols?: string): Promise<StockQuoteBatchResponse> {
+    const symbols = parseSymbols(rawSymbols);
+    return Effect.runPromise(this.stockQuoteService.getQuotes(symbols));
+  }
 
   @Get(':symbol/quote')
   async getQuote(@Param('symbol') symbol: string): Promise<StockQuoteResponse> {
@@ -42,6 +59,17 @@ export class StockQuoteController {
     }
     return result.right;
   }
+}
+
+function parseSymbols(rawSymbols: string | undefined): string[] {
+  if (rawSymbols === undefined) {
+    throw new BadRequestException('symbols query is required');
+  }
+  const symbols = [...new Set(rawSymbols.split(',').map((symbol) => symbol.trim()).filter(Boolean))];
+  if (symbols.length === 0 || symbols.length > 20) {
+    throw new BadRequestException('symbols must contain between 1 and 20 values');
+  }
+  return symbols;
 }
 
 function failedLog(

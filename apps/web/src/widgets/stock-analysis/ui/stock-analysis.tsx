@@ -1,9 +1,10 @@
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import type { HistoryRange, Market } from '@tw-stock-dashboard/contracts';
+import type { HistoryRange, Market, StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
 import { StockHistoryFocus, StockHistoryTable } from '../../../features/stock-history/index.js';
 import type { MaVisibility } from '../../../features/stock-history/ui/stock-history-chart.js';
-import { StockQuotePanel } from '../../../features/stock-quote/index.js';
+import { fetchStockQuoteBatch, StockQuotePanel } from '../../../features/stock-quote/index.js';
 import type { QuoteResolvedInfo } from '../../../features/stock-quote/index.js';
 import {
   addToWatchlist,
@@ -16,6 +17,12 @@ import type { WatchlistItem } from '../../../features/stock-watchlist/index.js';
 
 function isIntradayRange(range: HistoryRange): boolean {
   return range === '1d' || range === '3d' || range === '5d';
+}
+
+export function indexWatchlistQuotes(
+  items: readonly StockQuoteBatchItem[],
+): Readonly<Record<string, StockQuoteBatchItem>> {
+  return Object.fromEntries(items.map((item) => [item.symbol, item]));
 }
 
 export type HistoryDisabledReason = 'fugle-api-key' | 'esb-official-daily';
@@ -60,6 +67,16 @@ export function StockAnalysis({
   ) => void;
 }): JSX.Element {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>(() => loadWatchlist());
+  const watchlistSymbols = watchlist.map((item) => item.symbol);
+  const watchlistQuoteQuery = useQuery({
+    queryKey: ['watchlist-quotes', watchlistSymbols],
+    queryFn: () => fetchStockQuoteBatch(watchlistSymbols),
+    enabled: watchlistSymbols.length > 0,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+    retry: false,
+  });
+  const watchlistQuotes = indexWatchlistQuotes(watchlistQuoteQuery.data?.items ?? []);
   const [validatedStock, setValidatedStock] = useState<{ symbol: string; name: string } | null>(
     null,
   );
@@ -190,6 +207,11 @@ export function StockAnalysis({
       <aside className="watchlist-rail">
         <StockWatchlistPanel
           items={watchlist}
+          quotes={watchlistQuotes}
+          isLoading={watchlistQuoteQuery.isPending}
+          isRefreshing={watchlistQuoteQuery.isFetching && !watchlistQuoteQuery.isPending}
+          isError={watchlistQuoteQuery.isError}
+          onRetry={() => void watchlistQuoteQuery.refetch()}
           activeSymbol={validatedStock?.symbol ?? requestedSymbol}
           onSelectStock={onSelectWatchlistStock}
           onRemoveStock={onRemoveWatchlistStock}

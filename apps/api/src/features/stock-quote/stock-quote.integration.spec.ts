@@ -553,4 +553,33 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
     expect(res.body).toEqual(GENERIC_FAILURE);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
+  it('returns per-symbol results from one bounded batch request', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,999999,2330' })
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0]).toMatchObject({
+      symbol: '2330',
+      quote: { symbol: '2330', market: 'TWSE' },
+      error: null,
+    });
+    expect(res.body.items[1]).toEqual({
+      symbol: '999999',
+      quote: null,
+      error: 'not_found',
+    });
+  });
+
+  it('rejects a missing batch symbol query before provider I/O', async () => {
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/quotes').expect(400);
+
+    expect(res.body).toMatchObject({
+      statusCode: 400,
+      message: 'symbols query is required',
+    });
+  });
 });

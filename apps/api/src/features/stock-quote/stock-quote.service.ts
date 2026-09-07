@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Clock, Effect } from 'effect';
+import { Clock, Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
-import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
+import type { StockQuoteBatchItem, StockQuoteBatchResponse, StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
@@ -14,6 +14,13 @@ import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+
+type StockQuoteFailure =
+  | FugleQuoteError
+  | TwseMisQuoteError
+  | TpexEsbQuoteError
+  | StockNotFoundError
+  | UniverseUnavailableError;
 
 // Application seam: TTL cache in front of the Fugle primary / TWSE MIS
 // fallback workflow, and the single place that assembles source metadata.
@@ -34,10 +41,7 @@ export class StockQuoteService {
     @Inject(UniverseResolver) private readonly universe: UniverseResolver,
     @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {}
-  getQuote(symbol: string): Effect.Effect<
-    StockQuoteResponse,
-    FugleQuoteError | TwseMisQuoteError | TpexEsbQuoteError | StockNotFoundError | UniverseUnavailableError
-  > {
+  getQuote(symbol: string): Effect.Effect<StockQuoteResponse, StockQuoteFailure> {
     return Effect.gen(this, function* () {
       // Universe first: unknown symbols fail 404/503 here, and the resolved
       // market selects the provider — ESB never touches Fugle or MIS.
@@ -138,6 +142,25 @@ export class StockQuoteService {
     });
   }
 
+  getQuotes(symbols: readonly string[]): Effect.Effect<StockQuoteBatchResponse, never> {
+    return Effect.gen(this, function* () {
+      // One bounded batch request avoids a browser-side N+1 API pattern while
+      // preserving independent per-symbol failure states.
+      const outcomes = yield* Effect.all(
+        symbols.map((symbol) => Effect.either(this.getQuote(symbol))),
+        { concurrency: 4 },
+      );
+      const items: StockQuoteBatchItem[] = symbols.map((symbol, index) => {
+        const outcome = outcomes[index]!;
+        if (Either.isRight(outcome)) {
+          return { symbol, quote: outcome.right, error: null };
+        }
+        return { symbol, quote: null, error: batchError(outcome.left) };
+      });
+      return { items };
+    });
+  }
+
   // Shared response assembly: provenance stamping, TTL insertion, and the
   // served log/span event. Providers stay focused on normalized quotes.
   private assemble(
@@ -177,6 +200,16 @@ export class StockQuoteService {
       return response;
     });
   }
+}
+
+function batchError(error: StockQuoteFailure): NonNullable<StockQuoteBatchItem['error']> {
+  if (error._tag === 'StockNotFoundError') {
+    return 'not_found';
+  }
+  if (error._tag === 'UniverseUnavailableError') {
+    return 'unavailable';
+  }
+  return 'failed';
 }
 
 // Feature-local eligibility: transient/provider failures (including timeout)

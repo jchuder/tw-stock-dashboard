@@ -638,6 +638,7 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   padding: 10px 12px;
   cursor: pointer;
   border-top: 1px solid #eff1f0;
@@ -648,6 +649,53 @@ button {
 
 .watchlist-item:hover {
   background-color: #fafcfb;
+}
+
+.watchlist-item:focus-visible {
+  outline: 2px solid #b7bdb9;
+  outline-offset: 2px;
+}
+
+.watchlist-item-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 68px;
+}
+
+.watchlist-item-identity > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.watchlist-item-values {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.watchlist-price {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.watchlist-change {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.watchlist-item-status,
+.watchlist-refreshing {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .watchlist-item[aria-current="true"] {
