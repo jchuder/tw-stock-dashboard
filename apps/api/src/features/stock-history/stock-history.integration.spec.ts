@@ -361,6 +361,56 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
     });
     expect(res.body.candles.length).toBeGreaterThan(0);
   });
+  it('routes a resolved TPEX security to official TPEx history', async () => {
+    const tpexData = {
+      stat: 'ok',
+      tables: [
+        {
+          data: [
+            ['115/08/06', '2,000', '200,000', '102.00', '104.00', '101.00', '103.00', '+1.00', '600'],
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(
+      serveUniverseFirst(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('tpex.org.tw')) {
+          return new Response(JSON.stringify(tpexData), { status: 200 });
+        }
+        throw new Error(`unexpected upstream call: ${url}`);
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/6488/history?range=1m').expect(200);
+
+    expect(res.body.symbol).toBe('6488');
+    expect(res.body.market).toBe('TPEX');
+    expect(res.body.source).toEqual({
+      provider: 'tpex',
+      mode: 'eod',
+      asOf: '2026-08-06',
+    });
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('tpex.org.tw'))).toBe(true);
+  });
+  it('does not route ESB daily history through Fugle before the ESB provider exists', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(
+      serveUniverseFirst(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('api.fugle.tw')) {
+          throw new Error(`unexpected Fugle history call: ${url}`);
+        }
+        throw new Error(`unexpected upstream call: ${url}`);
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request(app.getHttpServer()).get('/api/v1/stocks/7883/history?range=1m').expect(500);
+
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('api.fugle.tw'))).toBe(false);
+  });
 
   it('does NOT fallback to official provider when Fugle returns 400 bad request', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');

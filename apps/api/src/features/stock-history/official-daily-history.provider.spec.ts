@@ -1,11 +1,54 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
-import { OfficialDailyHistoryProvider } from './official-daily-history.provider.js';
+import type { Security } from '@tw-stock-dashboard/contracts';
+import type { CacheService } from '../../libs/cache/cache.service.js';
+import {
+  HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS,
+  HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS,
+  OfficialDailyHistoryProvider,
+  monthlyHistoryCacheKey,
+  monthlyHistoryCacheTtl,
+} from './official-daily-history.provider.js';
+
+type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del'>;
+
+const TWSE_SECURITY: Security = {
+  symbol: '2330',
+  name: '台積電',
+  market: 'TWSE',
+  type: 'stock',
+};
+
+const TPEX_SECURITY: Security = {
+  symbol: '6488',
+  name: '環球晶',
+  market: 'TPEX',
+  type: 'stock',
+};
+
+function makeCache(initial: Record<string, unknown> = {}): TestCache {
+  const values = new Map(Object.entries(initial));
+  return {
+    getJson: vi.fn((key: string) => Effect.succeed(values.get(key) ?? null)),
+    setJson: vi.fn((key: string, value: unknown) => {
+      values.set(key, value);
+      return Effect.succeed(undefined);
+    }),
+    del: vi.fn(() => Effect.succeed(undefined)),
+  };
+}
+
+function createProvider(cache = makeCache()): OfficialDailyHistoryProvider {
+  return new OfficialDailyHistoryProvider(cache);
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('OfficialDailyHistoryProvider', () => {
-  const provider = new OfficialDailyHistoryProvider();
-
-  it('correctly resolves TWSE stock and parses daily rows', async () => {
+  it('routes TWSE daily history from resolved security identity without probing TPEx', async () => {
     const twseData = {
       stat: 'OK',
       data: [
@@ -13,20 +56,17 @@ describe('OfficialDailyHistoryProvider', () => {
         ['115/08/06', '12,000,000', '1,200,000', '1,040.00', '1,060.00', '1,030.00', '1,050.00', '+10.00', '1,200'],
       ],
     };
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: unknown) => {
-        const url = String(input);
-        if (url.includes('twse.com.tw')) {
-          return new Response(JSON.stringify(twseData), { status: 200 });
-        }
-        return new Response(JSON.stringify({ stat: 'No Data' }), { status: 200 });
-      }),
-    );
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (!url.includes('twse.com.tw')) {
+        throw new Error(`unexpected upstream call: ${url}`);
+      }
+      return new Response(JSON.stringify(twseData), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const result = await Effect.runPromise(
-      provider.getDailyHistory('2330', '2026-08-01', '2026-08-06'),
+      createProvider().getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06'),
     );
 
     expect(result.symbol).toBe('2330');
@@ -41,9 +81,10 @@ describe('OfficialDailyHistoryProvider', () => {
       close: 1040,
       volume: 10000000,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('correctly resolves TPEx stock and converts thousand-shares (仟股) volume to shares (* 1000)', async () => {
+  it('routes TPEX daily history from resolved security identity without probing TWSE', async () => {
     const tpexData = {
       stat: 'ok',
       tables: [
@@ -55,20 +96,17 @@ describe('OfficialDailyHistoryProvider', () => {
         },
       ],
     };
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: unknown) => {
-        const url = String(input);
-        if (url.includes('tpex.org.tw')) {
-          return new Response(JSON.stringify(tpexData), { status: 200 });
-        }
-        return new Response(JSON.stringify({ stat: '查詢無資料' }), { status: 200 });
-      }),
-    );
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (!url.includes('tpex.org.tw')) {
+        throw new Error(`unexpected upstream call: ${url}`);
+      }
+      return new Response(JSON.stringify(tpexData), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const result = await Effect.runPromise(
-      provider.getDailyHistory('6488', '2026-08-01', '2026-08-06'),
+      createProvider().getDailyHistory(TPEX_SECURITY, '2026-08-01', '2026-08-06'),
     );
 
     expect(result.symbol).toBe('6488');
@@ -77,60 +115,40 @@ describe('OfficialDailyHistoryProvider', () => {
     expect(result.candles).toHaveLength(2);
     expect(result.candles[0].volume).toBe(1500000);
     expect(result.candles[1].volume).toBe(2000000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves market when latest month has no data but prior month has data', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: unknown) => {
-        const url = String(input);
-        if (url.includes('tpex.org.tw')) {
-          if (url.includes('date=2026%2F09%2F01')) {
-            return new Response(JSON.stringify({ stat: 'ok', tables: [{ data: [] }] }), { status: 200 });
-          }
-          if (url.includes('date=2026%2F08%2F01')) {
-            return new Response(
-              JSON.stringify({
-                stat: 'ok',
-                tables: [
-                  {
-                    data: [
-                      ['115/08/28', '500', '50,000', '100.00', '102.00', '99.00', '101.00', '+1.00', '200'],
-                    ],
-                  },
-                ],
-              }),
-              { status: 200 },
-            );
-          }
-        }
-        return new Response(JSON.stringify({ stat: 'No Data' }), { status: 200 });
-      }),
-    );
+  it('fetches every requested month from the resolved market', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (!url.includes('tpex.org.tw')) {
+        throw new Error(`unexpected upstream call: ${url}`);
+      }
+      const date = url.includes('2026%2F09%2F01') ? '115/09/01' : '115/08/28';
+      return new Response(
+        JSON.stringify({
+          stat: 'ok',
+          tables: [{ data: [[date, '500', '50,000', '100.00', '102.00', '99.00', '101.00', '+1.00', '200']] }],
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const result = await Effect.runPromise(
-      provider.getDailyHistory('6488', '2026-08-01', '2026-09-02'),
+      createProvider().getDailyHistory(TPEX_SECURITY, '2026-08-01', '2026-09-02'),
     );
 
     expect(result.market).toBe('TPEX');
-    expect(result.candles).toHaveLength(1);
-    expect(result.candles[0].date).toBe('2026-08-28');
+    expect(result.candles).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('fails with OfficialDailyHistoryError when TPEx returns HTTP 500 without silently masking outage as empty', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: unknown) => {
-        const url = String(input);
-        if (url.includes('tpex.org.tw')) {
-          return new Response('Internal Server Error', { status: 500 });
-        }
-        return new Response(JSON.stringify({ stat: 'No Data' }), { status: 200 });
-      }),
-    );
+  it('fails with OfficialDailyHistoryError when the resolved provider returns HTTP 500', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('Internal Server Error', { status: 500 })));
 
     const either = await Effect.runPromise(
-      Effect.either(provider.getDailyHistory('6488', '2026-08-01', '2026-08-06')),
+      Effect.either(createProvider().getDailyHistory(TPEX_SECURITY, '2026-08-01', '2026-08-06')),
     );
 
     expect(either._tag).toBe('Left');
@@ -139,16 +157,14 @@ describe('OfficialDailyHistoryProvider', () => {
     }
   });
 
-  it('fails with StockHistoryNotFoundError when symbol does not exist on either TWSE or TPEx', async () => {
+  it('fails with StockHistoryNotFoundError when the resolved market has no rows', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
-        return new Response(JSON.stringify({ stat: 'No Data', tables: [{ data: [] }] }), { status: 200 });
-      }),
+      vi.fn(async () => new Response(JSON.stringify({ stat: 'OK', data: [] }), { status: 200 })),
     );
 
     const either = await Effect.runPromise(
-      Effect.either(provider.getDailyHistory('0000', '2026-08-01', '2026-08-06')),
+      Effect.either(createProvider().getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06')),
     );
 
     expect(either._tag).toBe('Left');
@@ -157,70 +173,82 @@ describe('OfficialDailyHistoryProvider', () => {
     }
   });
 
-  it('resolves TWSE successfully even when TPEx returns HTTP 503 (cross-market probe isolation)', async () => {
-    const twseData = {
-      stat: 'OK',
-      data: [
-        ['115/08/06', '12,000,000', '1,200,000', '1,040.00', '1,060.00', '1,030.00', '1,050.00', '+10.00', '1,200'],
-      ],
+  it('serves a normalized monthly cache hit without calling upstream', async () => {
+    const key = monthlyHistoryCacheKey('twse', '2330', '202608');
+    const cachedCandle = {
+      date: '2026-08-06',
+      open: 1040,
+      high: 1060,
+      low: 1030,
+      close: 1050,
+      volume: 12000000,
     };
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: unknown) => {
-        const url = String(input);
-        if (url.includes('twse.com.tw')) {
-          return new Response(JSON.stringify(twseData), { status: 200 });
-        }
-        if (url.includes('tpex.org.tw')) {
-          return new Response('Service Unavailable', { status: 503 });
-        }
-        return new Response('Not Found', { status: 404 });
-      }),
-    );
+    const cache = makeCache({ [key]: [cachedCandle] });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
 
     const result = await Effect.runPromise(
-      provider.getDailyHistory('2330', '2026-08-01', '2026-08-06'),
+      createProvider(cache).getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06'),
     );
 
-    expect(result.market).toBe('TWSE');
-    expect(result.provider).toBe('twse');
-    expect(result.candles).toHaveLength(1);
+    expect(result.candles).toEqual([cachedCandle]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(cache.getJson).toHaveBeenCalledWith(key);
+    expect(cache.setJson).not.toHaveBeenCalled();
   });
 
-  it('resolves TPEx successfully even when TWSE returns HTTP 503 (cross-market probe isolation)', async () => {
-    const tpexData = {
-      stat: 'ok',
-      tables: [
-        {
-          data: [
-            ['115/08/06', '2,000', '200,000', '102.00', '104.00', '101.00', '103.00', '+1.00', '600'],
-          ],
-        },
-      ],
-    };
-
+  it('writes an upstream month using the closed-month TTL', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-07T04:00:00.000Z'));
+    const cache = makeCache();
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: unknown) => {
-        const url = String(input);
-        if (url.includes('twse.com.tw')) {
-          return new Response('Service Unavailable', { status: 503 });
-        }
-        if (url.includes('tpex.org.tw')) {
-          return new Response(JSON.stringify(tpexData), { status: 200 });
-        }
-        return new Response('Not Found', { status: 404 });
-      }),
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            stat: 'OK',
+            data: [['115/08/06', '12,000,000', '1,200,000', '1,040.00', '1,060.00', '1,030.00', '1,050.00']],
+          }),
+          { status: 200 },
+        ),
+      ),
     );
 
-    const result = await Effect.runPromise(
-      provider.getDailyHistory('6488', '2026-08-01', '2026-08-06'),
+    await Effect.runPromise(createProvider(cache).getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06'));
+
+    expect(cache.setJson).toHaveBeenCalledWith(
+      monthlyHistoryCacheKey('twse', '2330', '202608'),
+      [
+        {
+          date: '2026-08-06',
+          open: 1040,
+          high: 1060,
+          low: 1030,
+          close: 1050,
+          volume: 12000000,
+        },
+      ],
+      HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS,
+    );
+  });
+
+  it('uses a short TTL for the current Taipei month and a day TTL for closed months', () => {
+    const now = Date.parse('2026-08-06T04:00:00.000Z');
+
+    expect(monthlyHistoryCacheTtl('202608', now)).toBe(HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS);
+    expect(monthlyHistoryCacheTtl('202607', now)).toBe(HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS);
+  });
+
+  it('rejects ESB until the dedicated official history provider is added', async () => {
+    const esb: Security = { symbol: '7883', name: '饗賓', market: 'ESB', type: 'stock' };
+
+    const either = await Effect.runPromise(
+      Effect.either(createProvider().getDailyHistory(esb, '2026-08-01', '2026-08-06')),
     );
 
-    expect(result.market).toBe('TPEX');
-    expect(result.provider).toBe('tpex');
-    expect(result.candles).toHaveLength(1);
-    expect(result.candles[0].volume).toBe(2000000);
+    expect(either._tag).toBe('Left');
+    if (either._tag === 'Left') {
+      expect(either.left._tag).toBe('OfficialDailyHistoryError');
+    }
   });
 });

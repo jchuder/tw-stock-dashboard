@@ -1,15 +1,30 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Duration, Effect } from 'effect';
+import type { Security } from '@tw-stock-dashboard/contracts';
+import { CacheService } from '../../libs/cache/cache.service.js';
 import type { BaseCandle } from './moving-average.js';
 import {
   OfficialDailyHistoryError,
   StockHistoryNotFoundError,
 } from './fugle-history.error.js';
-import { enumerateMonths } from './history-window.js';
+import { enumerateMonths, taipeiToday } from './history-window.js';
 
 export const TWSE_STOCK_DAY_URL = 'https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY';
 export const TPEX_TRADING_STOCK_URL = 'https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock';
+export const HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS = 5 * 60;
+export const HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS = 24 * 60 * 60;
 const UPSTREAM_TIMEOUT_MS = 3000;
+
+export function monthlyHistoryCacheKey(provider: 'twse' | 'tpex', symbol: string, month: string): string {
+  return `history:${provider}:${symbol}:${month}`;
+}
+
+export function monthlyHistoryCacheTtl(month: string, nowMs = Date.now()): number {
+  const currentMonth = taipeiToday(nowMs).slice(0, 7).replace('-', '');
+  return month === currentMonth
+    ? HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS
+    : HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS;
+}
 
 function parseRocDate(rocDateStr: string): string {
   const trimmed = rocDateStr.trim();
@@ -91,11 +106,40 @@ function dedupeAndSort(candles: BaseCandle[]): BaseCandle[] {
   }
   return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
+function parseCachedCandles(value: unknown): BaseCandle[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  if (
+    !value.every((item) => {
+      if (typeof item !== 'object' || item === null) return false;
+      const candle = item as Record<string, unknown>;
+      return (
+        typeof candle.date === 'string' &&
+        typeof candle.open === 'number' &&
+        Number.isFinite(candle.open) &&
+        typeof candle.high === 'number' &&
+        Number.isFinite(candle.high) &&
+        typeof candle.low === 'number' &&
+        Number.isFinite(candle.low) &&
+        typeof candle.close === 'number' &&
+        Number.isFinite(candle.close) &&
+        typeof candle.volume === 'number' &&
+        Number.isFinite(candle.volume)
+      );
+    })
+  ) {
+    return undefined;
+  }
+  return value as BaseCandle[];
+}
 
 @Injectable()
 export class OfficialDailyHistoryProvider {
+  constructor(@Inject(CacheService) private readonly cache: CacheService) {}
+
   getDailyHistory(
-    symbol: string,
+    security: Security,
     from: string,
     to: string,
   ): Effect.Effect<OfficialDailyHistoryResult, OfficialDailyHistoryError | StockHistoryNotFoundError> {
@@ -105,108 +149,34 @@ export class OfficialDailyHistoryProvider {
     }
 
     return Effect.gen(this, function* () {
-      const market = yield* this.resolveMarket(symbol, months);
-      if (!market) {
-        return yield* new StockHistoryNotFoundError({ symbol });
+      if (security.market === 'ESB') {
+        return yield* new OfficialDailyHistoryError({ cause: 'ESB history provider is not implemented in Phase 3a' });
       }
 
-      if (market === 'TWSE') {
-        const chunkResults = yield* Effect.all(
-          months.map((m) => this.fetchTwseMonth(symbol, m)),
-          { concurrency: 3 },
-        );
-        const merged = chunkResults.flat();
-        if (merged.length === 0) {
-          return yield* new StockHistoryNotFoundError({ symbol });
-        }
-        return {
-          symbol,
-          market: 'TWSE' as const,
-          provider: 'twse' as const,
-          candles: dedupeAndSort(merged),
-        };
-      }
-
-      const chunkResults = yield* Effect.all(
-        months.map((m) => this.fetchTpexMonth(symbol, m)),
-        { concurrency: 3 },
-      );
+      const fetchMonth =
+        security.market === 'TWSE'
+          ? (month: string) => this.fetchTwseMonth(security.symbol, month)
+          : (month: string) => this.fetchTpexMonth(security.symbol, month);
+      const chunkResults = yield* Effect.all(months.map(fetchMonth), { concurrency: 3 });
       const merged = chunkResults.flat();
       if (merged.length === 0) {
-        return yield* new StockHistoryNotFoundError({ symbol });
+        return yield* new StockHistoryNotFoundError({ symbol: security.symbol });
       }
       return {
-        symbol,
-        market: 'TPEX' as const,
-        provider: 'tpex' as const,
+        symbol: security.symbol,
+        market: security.market,
+        provider: security.market === 'TWSE' ? ('twse' as const) : ('tpex' as const),
         candles: dedupeAndSort(merged),
       };
     });
   }
 
-  private resolveMarket(
-    symbol: string,
-    months: string[],
-  ): Effect.Effect<'TWSE' | 'TPEX' | null, OfficialDailyHistoryError> {
-    // Bounded lookup policy: check up to the 3 most recent requested months to discover
-    // whether the symbol trades on TWSE or TPEx without exhausting upstream rate limits.
-    const probeMonths = [...months].reverse().slice(0, 3);
-    return Effect.gen(this, function* () {
-      let lastError: OfficialDailyHistoryError | null = null;
-
-      for (const month of probeMonths) {
-        const [twseOutcome, tpexOutcome] = yield* Effect.all(
-          [
-            Effect.either(this.checkTwseSymbol(symbol, month)),
-            Effect.either(this.checkTpexSymbol(symbol, month)),
-          ],
-          { concurrency: 2 },
-        );
-
-        if (twseOutcome._tag === 'Right' && twseOutcome.right) {
-          return 'TWSE';
-        }
-        if (tpexOutcome._tag === 'Right' && tpexOutcome.right) {
-          return 'TPEX';
-        }
-
-        if (twseOutcome._tag === 'Left') {
-          lastError = twseOutcome.left;
-        }
-        if (tpexOutcome._tag === 'Left') {
-          lastError = tpexOutcome.left;
-        }
-      }
-
-      if (lastError) {
-        return yield* Effect.fail(lastError);
-      }
-      return null;
-    });
-  }
-
-  private checkTwseSymbol(symbol: string, month: string): Effect.Effect<boolean, OfficialDailyHistoryError> {
-    const url = `${TWSE_STOCK_DAY_URL}?date=${encodeURIComponent(month)}01&stockNo=${encodeURIComponent(symbol)}&response=json`;
-    return Effect.tryPromise({
-      try: async (signal) => {
-        const res = await fetch(url, { signal });
-        if (!res.ok) {
-          if (res.status === 404) return false;
-          throw new Error(`TWSE returned HTTP ${res.status}`);
-        }
-        const json = (await res.json()) as { stat?: string; data?: unknown };
-        return json.stat === 'OK' && Array.isArray(json.data) && json.data.length > 0;
-      },
-      catch: (cause) => new OfficialDailyHistoryError({ cause }),
-    }).pipe(
-      Effect.timeoutFail({
-        duration: Duration.millis(UPSTREAM_TIMEOUT_MS),
-        onTimeout: () => new OfficialDailyHistoryError({ cause: 'timeout' }),
-      }),
-    );
-  }
-
   private fetchTwseMonth(symbol: string, month: string): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
+    const key = monthlyHistoryCacheKey('twse', symbol, month);
+    return this.withMonthlyCache(key, month, this.fetchTwseMonthUpstream(symbol, month));
+  }
+
+  private fetchTwseMonthUpstream(symbol: string, month: string): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
     const url = `${TWSE_STOCK_DAY_URL}?date=${encodeURIComponent(month)}01&stockNo=${encodeURIComponent(symbol)}&response=json`;
     return Effect.tryPromise({
       try: async (signal) => {
@@ -227,31 +197,12 @@ export class OfficialDailyHistoryProvider {
     );
   }
 
-  private checkTpexSymbol(symbol: string, month: string): Effect.Effect<boolean, OfficialDailyHistoryError> {
-    const yyyy = month.slice(0, 4);
-    const mm = month.slice(4, 6);
-    const url = `${TPEX_TRADING_STOCK_URL}?date=${encodeURIComponent(`${yyyy}/${mm}/01`)}&code=${encodeURIComponent(symbol)}&response=json`;
-    return Effect.tryPromise({
-      try: async (signal) => {
-        const res = await fetch(url, { signal });
-        if (!res.ok) {
-          if (res.status === 404) return false;
-          throw new Error(`TPEx returned HTTP ${res.status}`);
-        }
-        const json = (await res.json()) as { stat?: string; tables?: Array<{ data?: unknown }> };
-        const data = json.tables?.[0]?.data;
-        return json.stat === 'ok' && Array.isArray(data) && data.length > 0;
-      },
-      catch: (cause) => new OfficialDailyHistoryError({ cause }),
-    }).pipe(
-      Effect.timeoutFail({
-        duration: Duration.millis(UPSTREAM_TIMEOUT_MS),
-        onTimeout: () => new OfficialDailyHistoryError({ cause: 'timeout' }),
-      }),
-    );
+  private fetchTpexMonth(symbol: string, month: string): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
+    const key = monthlyHistoryCacheKey('tpex', symbol, month);
+    return this.withMonthlyCache(key, month, this.fetchTpexMonthUpstream(symbol, month));
   }
 
-  private fetchTpexMonth(symbol: string, month: string): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
+  private fetchTpexMonthUpstream(symbol: string, month: string): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
     const yyyy = month.slice(0, 4);
     const mm = month.slice(4, 6);
     const url = `${TPEX_TRADING_STOCK_URL}?date=${encodeURIComponent(`${yyyy}/${mm}/01`)}&code=${encodeURIComponent(symbol)}&response=json`;
@@ -273,5 +224,21 @@ export class OfficialDailyHistoryProvider {
         onTimeout: () => new OfficialDailyHistoryError({ cause: 'timeout' }),
       }),
     );
+  }
+
+  private withMonthlyCache(
+    key: string,
+    month: string,
+    upstream: Effect.Effect<BaseCandle[], OfficialDailyHistoryError>,
+  ): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
+    return Effect.gen(this, function* () {
+      const cached = parseCachedCandles(yield* this.cache.getJson(key));
+      if (cached !== undefined) {
+        return cached;
+      }
+      const candles = yield* upstream;
+      yield* this.cache.setJson(key, candles, monthlyHistoryCacheTtl(month));
+      return candles;
+    });
   }
 }

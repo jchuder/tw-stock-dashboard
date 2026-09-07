@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Clock, Effect } from 'effect';
-import type { HistoryRange, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
+import type { HistoryRange, Security, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
 import type { StockHistoryServiceError } from './fugle-history.error.js';
 import { IntradayRangeUnavailableError } from './fugle-history.error.js';
 import { FugleHistoryProvider } from './fugle-history.provider.js';
@@ -57,14 +57,11 @@ export class StockHistoryService {
       return Effect.fail(new IntradayRangeUnavailableError());
     }
     return Effect.gen(this, function* () {
-      // Universe next: unknown symbols fail 404/503 without probing monthly
-      // upstream endpoints. Market routing still uses the bounded
-      // TWSE/TPEX probe until Phase 3 hands routing to the resolver.
-      yield* this.universe.resolve(symbol);
+      const security = yield* this.universe.resolve(symbol);
       if (isIntradayRange(range)) {
         return yield* this.getIntradayHistory(symbol, range);
       }
-      return yield* this.getDailyHistory(symbol, range);
+      return yield* this.getDailyHistory(security, range);
     });
   }
 
@@ -111,14 +108,18 @@ export class StockHistoryService {
   }
 
   private getDailyHistory(
-    symbol: string,
+    security: Security,
     range: '1m' | '3m' | '6m' | '1y',
   ): Effect.Effect<StockHistoryResponse, StockHistoryServiceError> {
+    const symbol = security.symbol;
     return Effect.gen(this, function* () {
       const nowMs = yield* Clock.currentTimeMillis;
       const visible = historyWindow(range, nowMs);
       const warmupFrom = shiftCalendarMonths(visible.from, -WARMUP_MONTHS);
       const hasKey = isFugleKeyPresent();
+      if (security.market === 'ESB') {
+        return yield* this.getOfficialDailyHistory(security, range, warmupFrom, visible.from, visible.to);
+      }
 
       if (hasKey) {
         const fugleAttempt = Effect.gen(this, function* () {
@@ -154,17 +155,17 @@ export class StockHistoryService {
             if (!isEligibleFugleDailyFallback(err)) {
               return Effect.fail(err);
             }
-            return this.getOfficialDailyHistory(symbol, range, warmupFrom, visible.from, visible.to);
+            return this.getOfficialDailyHistory(security, range, warmupFrom, visible.from, visible.to);
           }),
         );
       }
 
-      return yield* this.getOfficialDailyHistory(symbol, range, warmupFrom, visible.from, visible.to);
+      return yield* this.getOfficialDailyHistory(security, range, warmupFrom, visible.from, visible.to);
     });
   }
 
   private getOfficialDailyHistory(
-    symbol: string,
+    security: Security,
     range: '1m' | '3m' | '6m' | '1y',
     warmupFrom: string,
     visibleFrom: string,
@@ -172,7 +173,7 @@ export class StockHistoryService {
   ): Effect.Effect<StockHistoryResponse, StockHistoryServiceError> {
     return Effect.gen(this, function* () {
       const official = yield* this.officialDailyHistoryProvider.getDailyHistory(
-        symbol,
+        security,
         warmupFrom,
         visibleTo,
       );
