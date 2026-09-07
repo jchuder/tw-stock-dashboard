@@ -149,7 +149,7 @@ export function StockAnalysis({
               <span className="public-data-banner-badge">公開資料模式</span>
               <span className="public-data-banner-text">
                 {validatedMarket === 'ESB'
-                  ? '報價來自 TPEx 興櫃官方公開資料；歷史 K 線來自交易所官方盤後日線。興櫃目前提供官方日均價資料。'
+                  ? '報價來自 TPEx 興櫃官方公開資料；目前提供官方日均價歷史走勢，暫不提供 5 分 K。'
                   : '報價來自 TWSE MIS，歷史 K 線來自交易所官方盤後日線。如需即時 5 分 K 與高頻盤中走勢，請配置 Fugle API Key。'}
               </span>
             </div>
