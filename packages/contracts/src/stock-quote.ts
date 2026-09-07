@@ -20,7 +20,7 @@ export const StockQuoteSchema = Schema.Struct({
   symbol: Schema.String,
   name: Schema.String,
   market: MarketSchema,
-  price: Schema.Number,
+  price: Schema.NullOr(Schema.Number),
   referencePrice: Schema.NullOr(Schema.Number),
   referencePriceType: ReferencePriceTypeSchema,
   change: Schema.NullOr(Schema.Number),

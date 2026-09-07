@@ -42,6 +42,7 @@ export interface HistoryControls {
   maVisibility: MaVisibility;
   onToggleMa: (key: keyof MaVisibility) => void;
   disableIntradayRanges?: boolean;
+  intradayDisabledReason?: 'fugle-api-key' | 'esb-official-daily' | null;
 }
 
 export function formatChartSourceText(source: StockHistoryResponse['source']): string {
@@ -67,6 +68,7 @@ export function StockHistoryFocus({
   maVisibility,
   onToggleMa,
   disableIntradayRanges = false,
+  intradayDisabledReason = 'fugle-api-key',
 }: {
   symbol: string;
 } & HistoryControls): JSX.Element {
@@ -156,7 +158,13 @@ export function StockHistoryFocus({
                   className={`period-btn${range === option.value ? ' active' : ''}`}
                   aria-pressed={range === option.value}
                   aria-disabled={isDisabled}
-                  title={isDisabled ? '5 分 K 需配置 Fugle API Key' : undefined}
+                  title={
+                    isDisabled
+                      ? intradayDisabledReason === 'esb-official-daily'
+                        ? '興櫃目前提供官方日均價資料'
+                        : '5 分 K 需配置 Fugle API Key'
+                      : undefined
+                  }
                   onClick={() => onRangeChange(option.value)}
                 >
                   {option.label}

@@ -51,11 +51,19 @@ export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
         return yield* new TpexEsbDecodeError({ stage: 'value' });
       }
 
-      const price = parseEsbNumber(entry.LatestPrice);
-      const referencePrice = parseEsbReference(entry.PreviousAveragePrice);
-      if (price === null) {
+      const parsedPrice = parseEsbPrice(entry.LatestPrice);
+      if (!parsedPrice.valid) {
         return yield* new TpexEsbDecodeError({ stage: 'value' });
       }
+      const price = parsedPrice.value;
+      const referencePrice = parseEsbReference(entry.PreviousAveragePrice);
+      const highPrice = parseEsbPrice(entry.Highest).value;
+      const lowPrice = parseEsbPrice(entry.Lowest).value;
+      const change = price === null || referencePrice === null ? null : round2(price - referencePrice);
+      const changePercent =
+        price === null || referencePrice === null
+          ? null
+          : round2(((price - referencePrice) / referencePrice) * 100);
 
       const quote = yield* Schema.decodeUnknown(StockQuoteSchema)({
         symbol: entry.SecuritiesCompanyCode.trim(),
@@ -64,12 +72,12 @@ export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
         price,
         referencePrice,
         referencePriceType: 'previous_average' as const,
-        change: referencePrice === null ? null : round2(price - referencePrice),
-        changePercent: referencePrice === null ? null : round2(((price - referencePrice) / referencePrice) * 100),
+        change,
+        changePercent,
         tradeDate: parseRocDate(entry.Date),
         openPrice: null,
-        highPrice: parseEsbNumber(entry.Highest),
-        lowPrice: parseEsbNumber(entry.Lowest),
+        highPrice,
+        lowPrice,
         tradeVolume: parseEsbVolume(entry.TransactionVolume),
         tradeVolumeUnit: 'share' as const,
         limitUpPrice: null,
@@ -78,6 +86,19 @@ export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
       return { quote, asOf: parseEsbDateTime(entry.Date, entry.Time) };
     });
   }
+}
+
+interface ParsedEsbPrice {
+  value: number | null;
+  valid: boolean;
+}
+
+function parseEsbPrice(raw: string): ParsedEsbPrice {
+  const value = parseEsbNumber(raw);
+  if (value === null) {
+    return { value: null, valid: false };
+  }
+  return { value: value === 0 ? null : value, valid: true };
 }
 
 function parseEsbNumber(raw: string): number | null {
@@ -116,7 +137,18 @@ function parseRocDate(raw: string): string | null {
   if (!match) {
     return null;
   }
-  return `${Number(match[1]) + 1911}-${match[2]}-${match[3]}`;
+  const year = Number(match[1]) + 1911;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) {
+    return null;
+  }
+  const timestamp = Date.UTC(year, month, 0);
+  const daysInMonth = new Date(timestamp).getUTCDate();
+  if (day > daysInMonth) {
+    return null;
+  }
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 // Snapshot `Date` + `Time` (HHMMSS, Asia/Taipei wall clock) mark the latest
@@ -127,7 +159,14 @@ function parseEsbDateTime(date: string, time: string): string | null {
   if (day === null || !clock) {
     return null;
   }
+  const hour = Number(clock[1]);
+  const minute = Number(clock[2]);
+  const second = Number(clock[3]);
+  if (hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
   const [year, month, dom] = day.split('-').map(Number);
-  const ms = Date.UTC(year, month - 1, dom, Number(clock[1]) - 8, Number(clock[2]), Number(clock[3]));
-  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+  const ms = Date.UTC(year, month - 1, dom, hour, minute, second) - 8 * 60 * 60 * 1000;
+  const result = new Date(ms);
+  return Number.isNaN(result.getTime()) ? null : result.toISOString();
 }

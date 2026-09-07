@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
+import type { Market } from '@tw-stock-dashboard/contracts';
 import { toast } from 'sonner';
 import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.js';
 
@@ -57,7 +58,7 @@ export function StockQuotePanel({
   requestedSymbol?: string | null;
   searchSeq?: number;
   onQuoteResolved?: (
-    stock: { symbol: string; name: string },
+    stock: { symbol: string; name: string; market: Market },
     info: QuoteResolvedInfo,
   ) => void;
   isInWatchlist?: boolean;
@@ -80,7 +81,7 @@ export function StockQuotePanel({
   useEffect(() => {
     if (quote.isSuccess && quote.data && quote.data.symbol === requestedSymbol) {
       onQuoteResolved?.(
-        { symbol: quote.data.symbol, name: quote.data.name },
+        { symbol: quote.data.symbol, name: quote.data.name, market: quote.data.market },
         {
           provider: quote.data.source.provider,
           asOf: quote.data.source.asOf,
@@ -181,7 +182,7 @@ export function StockQuotePanel({
               className={changeClass(quote.data.change)}
               style={{ fontSize: '2rem', fontWeight: '800', letterSpacing: '-0.02em' }}
             >
-              {quote.data.price}
+              {formatNullable(quote.data.price)}
             </span>
             <ChangeLine
               change={quote.data.change}
@@ -218,11 +219,11 @@ export function StockQuotePanel({
   );
 }
 
-function describePriceMove(price: number, change: number | null, changePercent: number | null): string {
+function describePriceMove(price: number | null, change: number | null, changePercent: number | null): string {
   if (change === null || changePercent === null) {
-    return `目前股價 ${price}，漲跌 —`;
+    return `目前股價 ${formatNullable(price)}，漲跌 —`;
   }
-  return `目前股價 ${price}，較前一交易日${change > 0 ? '上漲' : change < 0 ? '下跌' : '持平'} ${Math.abs(change)}，漲跌幅 ${changePercent}%`;
+  return `目前股價 ${formatNullable(price)}，較前一交易日${change > 0 ? '上漲' : change < 0 ? '下跌' : '持平'} ${Math.abs(change)}，漲跌幅 ${changePercent}%`;
 }
 
 function ChangeLine({

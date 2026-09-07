@@ -79,6 +79,59 @@ describe('TpexEsbQuoteProvider typed failures', () => {
       });
     }
   });
+  it('maps no-trade zero sentinels to null prices while preserving zero volume', async () => {
+    okOnce([
+      {
+        ...ROW_7883,
+        LatestPrice: '0',
+        Highest: '0',
+        Lowest: '0',
+        TransactionVolume: '0',
+        PreviousAveragePrice: '280',
+      },
+    ]);
+
+    const result = await run();
+
+    expect(result).toEqual(
+      Either.right({
+        quote: {
+          ...EXPECTED_QUOTE,
+          price: null,
+          highPrice: null,
+          lowPrice: null,
+          tradeVolume: 0,
+          change: null,
+          changePercent: null,
+        },
+        asOf: '2026-09-07T08:00:06.000Z',
+      }),
+    );
+  });
+
+  it('keeps the quote but nulls trade date and asOf for invalid ROC date', async () => {
+    okOnce([{ ...ROW_7883, Date: '1151399' }]);
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.tradeDate).toBeNull();
+      expect(result.right.asOf).toBeNull();
+    }
+  });
+
+  it('keeps the quote but nulls asOf for invalid snapshot time', async () => {
+    okOnce([{ ...ROW_7883, Time: '999999' }]);
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.tradeDate).toBe('2026-09-07');
+      expect(result.right.asOf).toBeNull();
+    }
+  });
 
   it('fails value decode when the symbol is absent from the snapshot', async () => {
     okOnce([{ ...ROW_7883, SecuritiesCompanyCode: '1260', CompanyName: '富味鄉' }]);
