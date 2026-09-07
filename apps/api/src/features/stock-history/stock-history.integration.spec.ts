@@ -394,22 +394,74 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
     });
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('tpex.org.tw'))).toBe(true);
   });
-  it('does not route ESB daily history through Fugle before the ESB provider exists', async () => {
-    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+  it('routes ESB daily history to official TPEx average-price history', async () => {
     const fetchMock = vi.fn(
       serveUniverseFirst(async (input: unknown) => {
         const url = String(input);
-        if (url.includes('api.fugle.tw')) {
-          throw new Error(`unexpected Fugle history call: ${url}`);
+        if (!url.includes('/emerging/historical')) {
+          throw new Error(`unexpected upstream call: ${url}`);
         }
-        throw new Error(`unexpected upstream call: ${url}`);
+        const requestedDate = decodeURIComponent(new URL(url).searchParams.get('date') ?? '');
+        const year = Number(requestedDate.slice(0, 4));
+        const month = requestedDate.slice(5, 7);
+        const average = 230 + Number(month);
+        return new Response(
+          JSON.stringify({
+            stat: 'ok',
+            date: requestedDate.replaceAll('/', ''),
+            tables: [
+              {
+                data: [
+                  [
+                    `${year - 1911}/${month}/06`,
+                    '1,000',
+                    '235,000',
+                    (average + 5).toFixed(2),
+                    (average - 5).toFixed(2),
+                    average.toFixed(2),
+                    '4',
+                    '200',
+                    '47,000',
+                    '0.00',
+                    '0.00',
+                    '0.00',
+                    '1',
+                  ],
+                ],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await request(app.getHttpServer()).get('/api/v1/stocks/7883/history?range=1m').expect(500);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/7883/history?range=1m').expect(200);
 
-    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('api.fugle.tw'))).toBe(false);
+    expect(res.body).toMatchObject({
+      symbol: '7883',
+      market: 'ESB',
+      range: '1m',
+      timeframe: '1d',
+      volumeUnit: 'share',
+      priceBasis: 'average',
+      source: {
+        provider: 'tpex-esb',
+        mode: 'eod',
+        asOf: '2026-08-06',
+      },
+    });
+    expect(res.body.candles.at(-1)).toMatchObject({
+      date: '2026-08-06',
+      open: null,
+      high: 243,
+      low: 233,
+      close: null,
+      average: 238,
+      volume: 1200,
+      ma5: 236,
+    });
   });
   it('rejects ESB intraday history even when Fugle is configured', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');

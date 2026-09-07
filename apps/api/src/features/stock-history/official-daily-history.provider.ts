@@ -12,7 +12,7 @@ export const HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS = 5 * 60;
 export const HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS = 24 * 60 * 60;
 const UPSTREAM_TIMEOUT_MS = 3000;
 
-export function monthlyHistoryCacheKey(provider: 'twse' | 'tpex', symbol: string, month: string): string {
+export function monthlyHistoryCacheKey(provider: 'twse' | 'tpex' | 'esb', symbol: string, month: string): string {
   return `history:${provider}:${symbol}:${month}`;
 }
 
@@ -147,7 +147,7 @@ export class OfficialDailyHistoryProvider {
 
     return Effect.gen(this, function* () {
       if (security.market === 'ESB') {
-        return yield* new OfficialDailyHistoryError({ cause: 'ESB history provider is not implemented in Phase 3a' });
+        return yield* new OfficialDailyHistoryError({ cause: 'ESB security must use TpexEsbHistoryProvider' });
       }
 
       const fetchMonth =

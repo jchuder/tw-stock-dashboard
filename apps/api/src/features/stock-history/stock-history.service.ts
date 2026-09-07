@@ -5,6 +5,7 @@ import type { StockHistoryServiceError } from './fugle-history.error.js';
 import { IntradayRangeUnavailableError } from './fugle-history.error.js';
 import { FugleHistoryProvider } from './fugle-history.provider.js';
 import { OfficialDailyHistoryProvider } from './official-daily-history.provider.js';
+import { TpexEsbHistoryProvider } from './tpex-esb-history.provider.js';
 import {
   cropToLastTradingDays,
   historyWindow,
@@ -15,7 +16,7 @@ import {
   splitQueryWindows,
   WARMUP_MONTHS,
 } from './history-window.js';
-import { applyMovingAverages } from './moving-average.js';
+import { applyAverageMovingAverages, applyMovingAverages } from './moving-average.js';
 import type { BaseCandle } from './moving-average.js';
 import type { StockNotFoundError, UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 import { UniverseResolver } from '../../libs/securities/universe.resolver.js';
@@ -44,6 +45,7 @@ export class StockHistoryService {
   constructor(
     @Inject(FugleHistoryProvider) private readonly fugleHistoryProvider: FugleHistoryProvider,
     @Inject(OfficialDailyHistoryProvider) private readonly officialDailyHistoryProvider: OfficialDailyHistoryProvider,
+    @Inject(TpexEsbHistoryProvider) private readonly tpexEsbHistoryProvider: TpexEsbHistoryProvider,
     @Inject(UniverseResolver) private readonly universe: UniverseResolver,
   ) {}
 
@@ -174,6 +176,10 @@ export class StockHistoryService {
     visibleFrom: string,
     visibleTo: string,
   ): Effect.Effect<StockHistoryResponse, StockHistoryServiceError> {
+    if (security.market === 'ESB') {
+      return this.getEsbOfficialDailyHistory(security, range, warmupFrom, visibleFrom, visibleTo);
+    }
+
     return Effect.gen(this, function* () {
       const official = yield* this.officialDailyHistoryProvider.getDailyHistory(
         security,
@@ -191,6 +197,34 @@ export class StockHistoryService {
         timeframe: '1d' as const,
         volumeUnit: 'share' as const,
         priceBasis: 'close' as const,
+        candles: visibleCandles,
+        source: {
+          provider: official.provider,
+          mode: 'eod' as const,
+          asOf: visibleCandles.length ? visibleCandles[visibleCandles.length - 1].date : null,
+        },
+      };
+    });
+  }
+
+  private getEsbOfficialDailyHistory(
+    security: Security,
+    range: '1m' | '3m' | '6m' | '1y',
+    warmupFrom: string,
+    visibleFrom: string,
+    visibleTo: string,
+  ): Effect.Effect<StockHistoryResponse, StockHistoryServiceError> {
+    return Effect.gen(this, function* () {
+      const official = yield* this.tpexEsbHistoryProvider.getDailyHistory(security, warmupFrom, visibleTo);
+      const withMa = applyAverageMovingAverages(official.candles);
+      const visibleCandles = withMa.filter((c) => c.date >= visibleFrom);
+      return {
+        symbol: official.symbol,
+        market: official.market,
+        range,
+        timeframe: '1d' as const,
+        volumeUnit: 'share' as const,
+        priceBasis: 'average' as const,
         candles: visibleCandles,
         source: {
           provider: official.provider,

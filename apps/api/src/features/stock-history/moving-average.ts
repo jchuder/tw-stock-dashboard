@@ -1,7 +1,5 @@
 // Provider-internal candle: upstream TWSE/TPEX/Fugle daily rows always carry
 // full OHLC numbers (rows that fail parsing are skipped before this point).
-// ESB average-basis candles arrive in Phase 3 with their own assembly; the
-// contract Candle stays nullable at the boundary.
 export interface BaseCandle {
   date: string;
   open: number;
@@ -10,12 +8,28 @@ export interface BaseCandle {
   close: number;
   volume: number;
 }
-export type CandleWithMa = BaseCandle & {
+
+// ESB official history is average-price based. Its first-group high/low and
+// average may be absent on days that only have second-group volume.
+export interface AverageBasisCandle {
+  date: string;
+  open: null;
+  high: number | null;
+  low: number | null;
+  close: null;
+  average: number | null;
+  volume: number;
+}
+
+type MovingAverageFields = {
   ma5: number | null;
   ma10: number | null;
   ma20: number | null;
   ma60: number | null;
 };
+
+export type CandleWithMa = BaseCandle & MovingAverageFields;
+export type AverageCandleWithMa = AverageBasisCandle & MovingAverageFields;
 
 // Simple moving average of daily close over ascending candles. A candle
 // carries its own window (including itself); fewer than N closes yields null.
@@ -30,6 +44,20 @@ export function applyMovingAverages(candles: ReadonlyArray<BaseCandle>): CandleW
   }));
 }
 
+// Average-basis MAs use the latest N valid average observations, skipping
+// null-average days. A null current observation never receives an MA.
+export function applyAverageMovingAverages(
+  candles: ReadonlyArray<AverageBasisCandle>,
+): AverageCandleWithMa[] {
+  return candles.map((candle, index) => ({
+    ...candle,
+    ma5: averageValidAverage(candles, index, 5),
+    ma10: averageValidAverage(candles, index, 10),
+    ma20: averageValidAverage(candles, index, 20),
+    ma60: averageValidAverage(candles, index, 60),
+  }));
+}
+
 function average(candles: ReadonlyArray<BaseCandle>, index: number, period: number): number | null {
   if (index + 1 < period) {
     return null;
@@ -39,6 +67,29 @@ function average(candles: ReadonlyArray<BaseCandle>, index: number, period: numb
     sum += candles[i].close;
   }
   return round2(sum / period);
+}
+
+function averageValidAverage(
+  candles: ReadonlyArray<AverageBasisCandle>,
+  index: number,
+  period: number,
+): number | null {
+  if (candles[index].average === null) {
+    return null;
+  }
+
+  let count = 0;
+  let sum = 0;
+  for (let i = index; i >= 0 && count < period; i -= 1) {
+    const value = candles[i].average;
+    if (value === null) {
+      continue;
+    }
+    sum += value;
+    count += 1;
+  }
+
+  return count === period ? round2(sum / period) : null;
 }
 
 function round2(value: number): number {
