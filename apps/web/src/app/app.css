@@ -630,7 +630,7 @@ button {
   list-style: none;
   padding: 0 12px 10px;
   margin: 0;
-  max-height: 260px;
+  max-height: min(60vh, 620px);
   overflow-y: auto;
 }
 
@@ -639,11 +639,37 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: 0 12px 0 0;
+  padding: 0 8px 0 0;
   border-top: 1px solid #eff1f0;
   border-radius: 8px;
   transition: background-color 0.15s ease;
   font-size: 13px;
+}
+
+.watchlist-drag-handle {
+  flex: 0 0 26px;
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.watchlist-drag-handle:active {
+  cursor: grabbing;
+}
+
+.watchlist-drag-handle:focus-visible,
+.watchlist-order-button:focus-visible {
+  outline: 2px solid #b7bdb9;
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.watchlist-item.is-dragging {
+  opacity: 0.55;
 }
 
 .watchlist-item-select {
@@ -684,6 +710,12 @@ button {
   font-weight: 400;
 }
 
+.watchlist-item-market {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .watchlist-item-values {
   display: flex;
   flex: 1;
@@ -716,6 +748,28 @@ button {
 .watchlist-item-select[aria-current='true'] {
   background-color: #e2e8f0;
   font-weight: 600;
+}
+
+.watchlist-order-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.watchlist-order-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.watchlist-order-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .btn-remove {

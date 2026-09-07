@@ -21,13 +21,13 @@ const PROVIDER_LABELS = {
 } as const;
 
 export function App(): JSX.Element {
-  // Boot focus: the first watchlist item (seeded with 2330 on first run) is
-  // queried immediately so the dashboard never opens on an empty analysis.
+  // Boot focus: the first default watchlist symbol is queried immediately so
+  // the dashboard never opens on an empty analysis.
   // The search box stays empty — it is an input control, not a selection
   // mirror, so the two are deliberately not synced.
   const [search, setSearch] = useState<{ symbol: string; seq: number } | null>(() => {
     const first = loadWatchlist()[0];
-    return first === undefined ? null : { symbol: first.symbol, seq: 0 };
+    return first === undefined ? null : { symbol: first, seq: 0 };
   });
   const [provenance, setProvenance] = useState<QuoteProvenance | null>(null);
 

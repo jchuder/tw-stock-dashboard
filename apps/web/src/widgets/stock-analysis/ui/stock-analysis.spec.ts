@@ -1,8 +1,9 @@
-import type { StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
+import type { Security, StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   hasRetryableWatchlistQuotes,
   indexWatchlistQuotes,
+  indexWatchlistSecurities,
   resolveQuoteHistoryMode,
 } from './stock-analysis.js';
 
@@ -40,6 +41,18 @@ describe('quote history capability', () => {
     const indexed = indexWatchlistQuotes(items);
 
     expect(Object.keys(indexed)).toEqual(['2330', '7883']);
+    expect(indexed['2330']).toEqual(items[0]);
+    expect(indexed['7883']).toEqual(items[1]);
+  });
+
+  it('indexes security metadata for watchlist display', () => {
+    const items = [
+      { symbol: '2330', name: '台積電', market: 'TWSE', type: 'stock' },
+      { symbol: '7883', name: '鑫科', market: 'TPEX', type: 'stock' },
+    ] satisfies readonly Security[];
+
+    const indexed = indexWatchlistSecurities(items);
+
     expect(indexed['2330']).toEqual(items[0]);
     expect(indexed['7883']).toEqual(items[1]);
   });
