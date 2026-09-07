@@ -3,3 +3,26 @@ node = "24.20.0"
 
 [settings]
 idiomatic_version_file_enable_tools = ["pnpm"]
+
+[tasks.build]
+description = "建置專案產物"
+run = "pnpm build"
+
+[tasks."demo:api"]
+description = "啟動後端 API (包含 OTel 遙測)"
+depends = ["build"]
+run = "pnpm --filter @tw-stock-dashboard/api start:otel"
+
+[tasks."demo:web"]
+description = "啟動前端 Web (Tunnel 模式，使用相對路徑 API)"
+depends = ["build"]
+run = "pnpm dev:web:tunnel"
+
+[tasks."demo:tunnel"]
+description = "啟動 Cloudflare 臨時公開通道"
+depends = ["build"]
+run = "cloudflared tunnel --url http://localhost:5173"
+
+[tasks.demo]
+description = "一鍵啟動 Demo (後端 OTel + 前端 Tunnel + Cloudflare)"
+depends = ["demo:api", "demo:web", "demo:tunnel"]
