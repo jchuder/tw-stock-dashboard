@@ -2,7 +2,7 @@
 
 A production-minded Taiwan stock dashboard demo built with NestJS, Effect and React.
 
-![Taiwan Stock Dashboard](docs/dashboard.png)
+<img src="docs/dashboard.png" alt="Taiwan Stock Dashboard">
 
 ## 功能特色
 

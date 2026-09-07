@@ -8,7 +8,7 @@ import {
   WATCHLIST_STORAGE_KEY,
 } from './stock-watchlist.js';
 
-const DEFAULT_WATCHLIST = ['7883', '2330', '00981A', '0050', '00878', '2317', '00919', '2059'];
+const DEFAULT_WATCHLIST = ['2330', '7883', '00981A', '0050', '00878', '2317', '00919', '2059'];
 
 function createMockStorage(): Storage {
   const store = new Map<string, string>();

@@ -6,8 +6,8 @@ export const WatchlistSchema = Schema.Array(Schema.String);
 export type Watchlist = string[];
 
 const DEFAULT_WATCHLIST: readonly string[] = [
-  '7883',
   '2330',
+  '7883',
   '00981A',
   '0050',
   '00878',
