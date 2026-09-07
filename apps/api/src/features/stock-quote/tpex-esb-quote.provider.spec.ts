@@ -127,6 +127,55 @@ describe('TpexEsbQuoteProvider typed failures', () => {
     );
   });
 
+  it('coalesces concurrent cold misses into one snapshot refresh', async () => {
+    const cache = makeCache();
+    const row1260 = { ...ROW_7883, SecuritiesCompanyCode: '1260', CompanyName: '富味鄉' };
+    let releaseFetch!: () => void;
+    let markFetchStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const fetchGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const fetchMock = vi.fn(async () => {
+      markFetchStarted();
+      await fetchGate;
+      return new Response(JSON.stringify([ROW_7883, row1260]), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = cachedProvider(cache);
+
+    const firstPromise = Effect.runPromise(Effect.either(provider.getQuote('7883')));
+    await fetchStarted;
+    const secondPromise = Effect.runPromise(Effect.either(provider.getQuote('1260')));
+    releaseFetch();
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    expect(Either.isRight(first)).toBe(true);
+    expect(Either.isRight(second)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cache.setJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the in-flight refresh after an upstream failure', async () => {
+    const cache = makeCache();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('boom', { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([ROW_7883]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = cachedProvider(cache);
+
+    const first = await Effect.runPromise(Effect.either(provider.getQuote('7883')));
+    const second = await Effect.runPromise(Effect.either(provider.getQuote('7883')));
+
+    expect(Either.isLeft(first)).toBe(true);
+    expect(Either.isRight(second)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(cache.setJson).toHaveBeenCalledTimes(1);
+  });
+
   it('refreshes and replaces an invalid cached snapshot', async () => {
     const cache = makeCache({ [ESB_SNAPSHOT_CACHE_KEY]: { invalid: true } });
     okOnce([ROW_7883]);

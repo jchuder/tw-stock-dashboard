@@ -25,6 +25,8 @@ export const ESB_SNAPSHOT_CACHE_TTL_SECONDS = 30;
 // shares (股), matching the ESB daily 成交股數.
 @Injectable()
 export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
+  // ponytail: process-local singleflight; add a distributed lock only if API replicas need cross-process stampede control.
+  private snapshotRefresh: Promise<Either.Either<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError>> | null = null;
   constructor(@Inject(CacheService) private readonly cache: CacheService) {}
 
   getQuote(symbol: string): Effect.Effect<QuoteProviderResult, TpexEsbQuoteError> {
@@ -84,6 +86,23 @@ export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
         yield* this.cache.del(ESB_SNAPSHOT_CACHE_KEY);
       }
 
+      return yield* this.refreshSnapshot();
+    });
+  }
+
+  private refreshSnapshot(): Effect.Effect<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError> {
+    const refresh =
+      this.snapshotRefresh ??
+      (this.snapshotRefresh = Effect.runPromise(Effect.either(this.fetchSnapshotAndCache())).finally(() => {
+        this.snapshotRefresh = null;
+      }));
+    return Effect.promise(() => refresh).pipe(
+      Effect.flatMap((result) => (Either.isRight(result) ? Effect.succeed(result.right) : Effect.fail(result.left))),
+    );
+  }
+
+  private fetchSnapshotAndCache(): Effect.Effect<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError> {
+    return Effect.gen(this, function* () {
       const response = yield* Effect.tryPromise({
         try: (signal) => fetch(TPEX_ESB_SNAPSHOT_URL, { signal, headers: { Accept: 'application/json' } }),
         catch: () => new TpexEsbNetworkError(),
