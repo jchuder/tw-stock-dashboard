@@ -17,6 +17,10 @@ import {
 } from '../../../features/stock-watchlist/index.js';
 import type { WatchlistDisplayItem } from '../../../features/stock-watchlist/index.js';
 
+function isIntradayRange(range: HistoryRange): boolean {
+  return range === '1d' || range === '3d' || range === '5d';
+}
+
 export function indexWatchlistQuotes(
   items: readonly StockQuoteBatchItem[],
 ): Readonly<Record<string, StockQuoteBatchItem>> {
@@ -45,6 +49,29 @@ export function buildWatchlistItems(
 
 export function hasRetryableWatchlistQuotes(items: readonly StockQuoteBatchItem[]): boolean {
   return items.some((item) => item.error === 'failed' || item.error === 'unavailable');
+}
+
+export type HistoryDisabledReason = 'fugle-api-key' | 'esb-official-daily';
+
+export interface QuoteHistoryMode {
+  disableIntradayRanges: boolean;
+  range: HistoryRange;
+  disabledReason: HistoryDisabledReason | null;
+}
+
+export function resolveQuoteHistoryMode(
+  range: HistoryRange,
+  market: Market | null,
+  fallbackReason: 'config_missing' | 'upstream_unavailable' | null | undefined,
+): QuoteHistoryMode {
+  const isEsb = market === 'ESB';
+  const isPublicDataMode = fallbackReason === 'config_missing';
+  const disableIntradayRanges = isEsb || isPublicDataMode;
+  return {
+    disableIntradayRanges,
+    range: disableIntradayRanges && isIntradayRange(range) ? '1m' : range,
+    disabledReason: isEsb ? 'esb-official-daily' : isPublicDataMode ? 'fugle-api-key' : null,
+  };
 }
 
 // Stock analysis: left focus column (one focus card with quote, legend,
@@ -92,7 +119,9 @@ export function StockAnalysis({
   const [validatedStock, setValidatedStock] = useState<{ symbol: string; name: string } | null>(
     null,
   );
+  const [validatedMarket, setValidatedMarket] = useState<Market | null>(null);
   const [range, setRange] = useState<HistoryRange>('1d');
+  const [isPublicDataMode, setIsPublicDataMode] = useState(false);
   const [maVisibility, setMaVisibility] = useState<MaVisibility>({
     ma5: true,
     ma10: false,
@@ -105,15 +134,20 @@ export function StockAnalysis({
   useEffect(() => {
     if (requestedSymbol !== validatedStock?.symbol) {
       setValidatedStock(null);
+      setValidatedMarket(null);
+      setIsPublicDataMode(false);
       onProvenance?.(null);
     }
   }, [requestedSymbol, validatedStock?.symbol, onProvenance]);
 
   const handleQuoteResolved = useCallback(
-    (
-      stock: { symbol: string; name: string; market: Market },
-      info: QuoteResolvedInfo,
-    ): void => {
+    (stock: { symbol: string; name: string; market: Market }, info: QuoteResolvedInfo): void => {
+      const publicMode = info.fallbackReason === 'config_missing';
+      setIsPublicDataMode(publicMode);
+      setValidatedMarket(stock.market);
+      setRange((currentRange) =>
+        resolveQuoteHistoryMode(currentRange, stock.market, info.fallbackReason).range,
+      );
       setValidatedStock((current) =>
         current?.symbol === stock.symbol && current.name === stock.name
           ? current
@@ -162,10 +196,27 @@ export function StockAnalysis({
 
   const isCurrentInWatchlist =
     validatedStock !== null && watchlist.includes(validatedStock.symbol);
+  const historyMode = resolveQuoteHistoryMode(
+    range,
+    validatedMarket,
+    isPublicDataMode ? 'config_missing' : null,
+  );
+
   return (
     <div className="stock-analysis-layout">
       <div className="focus-column">
         <div className="dashboard-card focus-card">
+          {(isPublicDataMode || validatedMarket === 'ESB') && (
+            <div data-testid="public-data-banner" className="public-data-banner" role="status" aria-label="公開資料模式提示">
+              <span className="public-data-banner-badge">公開資料模式</span>
+              <span className="public-data-banner-text">
+                {validatedMarket === 'ESB'
+                  ? '報價來自 TPEx 興櫃官方公開資料；目前提供官方日均價歷史走勢，暫不提供 5 分 K。'
+                  : '報價來自 TWSE / TPEx 官方盤後日線；歷史 K 線同樣使用交易所官方盤後日線。如需即時 5 分 K 與高頻盤中走勢，請設定 Fugle API Key。'}
+              </span>
+            </div>
+          )}
+
           <StockQuotePanel
             requestedSymbol={requestedSymbol}
             searchSeq={searchSeq}
@@ -189,6 +240,8 @@ export function StockAnalysis({
               onRangeChange={setRange}
               maVisibility={maVisibility}
               onToggleMa={onToggleMa}
+              disableIntradayRanges={historyMode.disableIntradayRanges}
+              intradayDisabledReason={historyMode.disabledReason}
             />
           )}
         </div>

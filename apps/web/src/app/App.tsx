@@ -15,9 +15,12 @@ export interface QuoteProvenance {
   fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
 }
 
-const PROVIDER_LABELS: Partial<Record<StockQuoteProvider, string>> = {
-  fugle: 'Fugle API Connected',
+const PROVIDER_LABELS: Record<StockQuoteProvider, string> = {
+  fugle: 'Fugle API',
   'twse-mis': 'TWSE MIS',
+  'twse-openapi': 'TWSE OpenAPI',
+  'tpex-openapi': 'TPEx OpenAPI',
+  'tpex-esb': 'TPEX ESB',
 };
 
 export function App(): JSX.Element {
@@ -51,7 +54,11 @@ export function App(): JSX.Element {
           <div className="top-meta">
             <div>
               <strong>資料來源：</strong>
-              {provenance === null ? '—' : PROVIDER_LABELS[provenance.provider] ?? provenance.provider}
+              {provenance === null
+                ? '—'
+                : provenance.fallbackReason === 'config_missing'
+                  ? `${PROVIDER_LABELS[provenance.provider]}（公開資料模式）`
+                  : PROVIDER_LABELS[provenance.provider]}
             </div>
             <div>
               最後更新：
