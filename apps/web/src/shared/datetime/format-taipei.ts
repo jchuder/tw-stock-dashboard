@@ -32,3 +32,40 @@ export function formatTaipeiDate(asOf: string): string {
   const [year, month, day] = asOf.split('-');
   return `${year}/${month}/${day}`;
 }
+
+// `13:30:05` — the market-overview intraday timestamp style.
+export function formatTaipeiTime(iso: string): string {
+  const parts = taipeiParts(new Date(iso));
+  return `${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+// Monday to Friday 08:55 ~ 13:35 in Asia/Taipei
+export function isTaipeiTradingWindow(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TAIPEI_TIME_ZONE,
+    weekday: 'short',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  }).formatToParts(now);
+
+  const byType: Record<string, string> = {};
+  for (const part of parts) {
+    byType[part.type] = part.value;
+  }
+
+  const day = byType.weekday;
+  if (day === 'Sat' || day === 'Sun') {
+    return false;
+  }
+
+  const hour = Number(byType.hour);
+  const minute = Number(byType.minute);
+  const totalMinutes = hour * 60 + minute;
+
+  // 08:55 is 8 * 60 + 55 = 535
+  // 13:35 is 13 * 60 + 35 = 815
+  return totalMinutes >= 535 && totalMinutes <= 815;
+}
+
+

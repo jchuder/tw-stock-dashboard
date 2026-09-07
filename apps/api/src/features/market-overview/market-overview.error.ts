@@ -24,4 +24,16 @@ export class InstitutionalFlowError extends Data.TaggedError('InstitutionalFlowE
   }
 }
 
-export type MarketOverviewError = TwseMarketError | TpexMarketError | InstitutionalFlowError;
+export class TwseMisIndexError extends Data.TaggedError('TwseMisIndexError')<{
+  readonly cause?: unknown;
+}> {
+  constructor(args?: { readonly cause?: unknown }) {
+    super(args as { readonly cause?: unknown });
+  }
+}
+
+export type MarketOverviewError =
+  | TwseMarketError
+  | TpexMarketError
+  | InstitutionalFlowError
+  | TwseMisIndexError;

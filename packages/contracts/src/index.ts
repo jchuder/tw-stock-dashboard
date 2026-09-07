@@ -11,11 +11,15 @@ export type { Candle, HistoryRange, StockHistoryResponse, Timeframe, VolumeUnit 
 export {
   InstitutionalFlowSnapshotSchema,
   MarketIndexSnapshotSchema,
+  MarketIndexSourceSchema,
   MarketOverviewResponseSchema,
+  MarketSnapshotStateSchema,
 } from './market-overview.js';
 export type {
   InstitutionalFlowSnapshot,
   MarketIndexSnapshot,
+  MarketIndexSource,
   MarketOverviewResponse,
+  MarketSnapshotState,
 } from './market-overview.js';
 

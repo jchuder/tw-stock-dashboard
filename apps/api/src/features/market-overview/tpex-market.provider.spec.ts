@@ -30,10 +30,13 @@ describe('TpexMarketProvider', () => {
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right).toEqual({
-        asOf: '2026-09-04',
-        close: 402.48,
+        value: 402.48,
         change: 7.23,
         changePercent: 1.83,
+        state: 'closed',
+        tradeDate: '2026-09-04',
+        asOf: null,
+        source: 'tpex',
       });
     }
   });
@@ -58,10 +61,13 @@ describe('TpexMarketProvider', () => {
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right).toEqual({
-        asOf: '2026-09-03',
-        close: 395.25,
+        value: 395.25,
         change: -11.71,
         changePercent: -2.88,
+        state: 'closed',
+        tradeDate: '2026-09-03',
+        asOf: null,
+        source: 'tpex',
       });
     }
   });
@@ -101,8 +107,15 @@ describe('TpexMarketProvider', () => {
     const result = await Effect.runPromise(Effect.either(provider.getOtc()));
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
-      expect(result.right.asOf).toBe('2026-09-04');
-      expect(result.right.close).toBe(402.48);
+      expect(result.right).toEqual({
+        value: 402.48,
+        change: 7.23,
+        changePercent: 1.83,
+        state: 'closed',
+        tradeDate: '2026-09-04',
+        asOf: null,
+        source: 'tpex',
+      });
     }
   });
 

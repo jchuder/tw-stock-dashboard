@@ -61,3 +61,19 @@ export const TwseBfi82uResponseSchema = Schema.Struct({
   data: Schema.Array(Schema.Array(Schema.String)),
 });
 export type TwseBfi82uResponse = Schema.Schema.Type<typeof TwseBfi82uResponseSchema>;
+
+export const TwseMisIndexItemSchema = Schema.Struct({
+  c: Schema.String,
+  z: Schema.String,
+  y: Schema.String,
+  d: Schema.String,
+  t: Schema.String,
+  n: Schema.optional(Schema.String),
+});
+export type TwseMisIndexItem = Schema.Schema.Type<typeof TwseMisIndexItemSchema>;
+
+export const TwseMisIndexResponseSchema = Schema.Struct({
+  msgArray: Schema.Array(TwseMisIndexItemSchema),
+  rtcode: Schema.optional(Schema.String),
+});
+export type TwseMisIndexResponse = Schema.Schema.Type<typeof TwseMisIndexResponseSchema>;

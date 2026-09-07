@@ -58,6 +58,28 @@ const MOCK_TWSE_BFI82U = {
   ],
 };
 
+const MOCK_TWSE_MIS = {
+  msgArray: [
+    {
+      c: 't00',
+      n: '加權指數',
+      z: '47,326.27',
+      y: '46,551.13',
+      d: '20260907',
+      t: '13:33:00',
+    },
+    {
+      c: 'o00',
+      n: '櫃買指數',
+      z: '409.33',
+      y: '402.48',
+      d: '20260907',
+      t: '13:33:00',
+    },
+  ],
+  rtcode: '0000',
+};
+
 describe('GET /api/v1/market/overview', () => {
   let app: INestApplication;
 
@@ -79,11 +101,55 @@ describe('GET /api/v1/market/overview', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns 200 with normalized market overview on happy path', async () => {
+  it('returns 200 with MIS real-time/latest index overview on primary path', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(async (input: unknown) => {
         const url = String(input);
+        if (url.includes('getStockInfo.jsp')) {
+          return new Response(JSON.stringify(MOCK_TWSE_MIS), { status: 200 });
+        }
+        if (url.includes('BFI82U')) {
+          return new Response(JSON.stringify(MOCK_TWSE_BFI82U), { status: 200 });
+        }
+        return new Response('Not Found', { status: 404 });
+      }),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/market/overview');
+    expect(res.status).toBe(200);
+    expect(res.body.taiex).toMatchObject({
+      value: 47326.27,
+      change: 775.14,
+      changePercent: 1.67,
+      tradeDate: '2026-09-07',
+      source: 'twse-mis',
+    });
+    expect(res.body.otc).toMatchObject({
+      value: 409.33,
+      change: 6.85,
+      changePercent: 1.7,
+      tradeDate: '2026-09-07',
+      source: 'twse-mis',
+    });
+    expect(res.body.institutional).toEqual({
+      asOf: '2026-09-04',
+      market: 'TWSE',
+      foreignNetAmount: 56212953803,
+      investmentTrustNetAmount: -910866463,
+      dealerNetAmount: 6370061244,
+      totalNetAmount: 61672148584,
+    });
+  });
+
+  it('falls back to OpenAPI providers when MIS is unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('getStockInfo.jsp')) {
+          return new Response('Service Unavailable', { status: 503 });
+        }
         if (url.includes('MI_INDEX')) {
           return new Response(JSON.stringify(MOCK_TWSE_MI_INDEX), { status: 200 });
         }
@@ -101,16 +167,22 @@ describe('GET /api/v1/market/overview', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       taiex: {
-        asOf: '2026-09-04',
-        close: 46551.13,
+        value: 46551.13,
         change: 693.47,
         changePercent: 1.51,
+        state: 'closed',
+        tradeDate: '2026-09-04',
+        asOf: null,
+        source: 'twse',
       },
       otc: {
-        asOf: '2026-09-04',
-        close: 402.48,
+        value: 402.48,
         change: 7.23,
         changePercent: 1.83,
+        state: 'closed',
+        tradeDate: '2026-09-04',
+        asOf: null,
+        source: 'tpex',
       },
       institutional: {
         asOf: '2026-09-04',
@@ -128,6 +200,9 @@ describe('GET /api/v1/market/overview', () => {
       'fetch',
       vi.fn().mockImplementation(async (input: unknown) => {
         const url = String(input);
+        if (url.includes('getStockInfo.jsp')) {
+          return new Response('Server Error', { status: 500 });
+        }
         if (url.includes('MI_INDEX')) {
           return new Response('Server Error', { status: 500 });
         }
