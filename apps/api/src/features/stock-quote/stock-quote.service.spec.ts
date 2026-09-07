@@ -3,6 +3,7 @@ import type { PinoLogger } from 'nestjs-pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import type { Security, StockQuoteResponse } from '@tw-stock-dashboard/contracts';
+import { CacheService } from '../../libs/cache/cache.service.js';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
 import { StockNotFoundError } from '../../libs/securities/universe.error.js';
@@ -76,7 +77,7 @@ function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
-    new TpexEsbQuoteProvider(),
+    new TpexEsbQuoteProvider(new CacheService()),
     new StockQuoteCache(),
     fakeUniverse(),
     silentLogger(),

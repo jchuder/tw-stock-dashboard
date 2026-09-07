@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { Duration, Effect, Schema } from 'effect';
+import { Inject, Injectable } from '@nestjs/common';
+import { Duration, Either, Effect, Schema } from 'effect';
 import { StockQuoteSchema } from '@tw-stock-dashboard/contracts';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 import {
@@ -9,10 +9,13 @@ import {
   TpexEsbTimeoutError,
 } from './tpex-esb-quote.error.js';
 import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
-import { TpexEsbSnapshotSchema } from './tpex-esb-quote.schema.js';
+import { TpexEsbSnapshotSchema, type TpexEsbEntry } from './tpex-esb-quote.schema.js';
+import { CacheService } from '../../libs/cache/cache.service.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 export const TPEX_ESB_SNAPSHOT_URL = 'https://www.tpex.org.tw/openapi/v1/tpex_esb_latest_statistics';
+export const ESB_SNAPSHOT_CACHE_KEY = 'esb-latest:v1';
+export const ESB_SNAPSHOT_CACHE_TTL_SECONDS = 30;
 
 // TPEx ESB latest-statistics snapshot: one ~140KB full-market payload,
 // filtered locally for the symbol. ESB is a negotiated quote-driven market
@@ -22,28 +25,11 @@ export const TPEX_ESB_SNAPSHOT_URL = 'https://www.tpex.org.tw/openapi/v1/tpex_es
 // shares (股), matching the ESB daily 成交股數.
 @Injectable()
 export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
-  getQuote(symbol: string): Effect.Effect<QuoteProviderResult, TpexEsbQuoteError> {
-    return Effect.gen(function* () {
-      const response = yield* Effect.tryPromise({
-        try: (signal) => fetch(TPEX_ESB_SNAPSHOT_URL, { signal, headers: { Accept: 'application/json' } }),
-        catch: () => new TpexEsbNetworkError(),
-      }).pipe(
-        Effect.timeoutFail({
-          duration: Duration.millis(UPSTREAM_TIMEOUT_MS),
-          onTimeout: () => new TpexEsbTimeoutError(),
-        }),
-      );
-      if (!response.ok) {
-        return yield* new TpexEsbHttpError({ status: response.status });
-      }
+  constructor(@Inject(CacheService) private readonly cache: CacheService) {}
 
-      const raw = yield* Effect.tryPromise({
-        try: () => response.json() as Promise<unknown>,
-        catch: () => new TpexEsbDecodeError({ stage: 'json' }),
-      });
-      const snapshot = yield* Schema.decodeUnknown(TpexEsbSnapshotSchema)(raw).pipe(
-        Effect.mapError(() => new TpexEsbDecodeError({ stage: 'schema' })),
-      );
+  getQuote(symbol: string): Effect.Effect<QuoteProviderResult, TpexEsbQuoteError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.getSnapshot();
       const entry = snapshot.find((row) => row.SecuritiesCompanyCode.trim() === symbol);
       if (!entry) {
         // The universe already proved the symbol exists: absence here means
@@ -84,6 +70,42 @@ export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
         limitDownPrice: null,
       }).pipe(Effect.mapError(() => new TpexEsbDecodeError({ stage: 'schema' })));
       return { quote, asOf: parseEsbDateTime(entry.Date, entry.Time) };
+    });
+  }
+
+  private getSnapshot(): Effect.Effect<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError> {
+    return Effect.gen(this, function* () {
+      const cached = yield* this.cache.getJson(ESB_SNAPSHOT_CACHE_KEY);
+      if (cached !== null) {
+        const decoded = yield* Effect.either(Schema.decodeUnknown(TpexEsbSnapshotSchema)(cached));
+        if (Either.isRight(decoded)) {
+          return decoded.right;
+        }
+        yield* this.cache.del(ESB_SNAPSHOT_CACHE_KEY);
+      }
+
+      const response = yield* Effect.tryPromise({
+        try: (signal) => fetch(TPEX_ESB_SNAPSHOT_URL, { signal, headers: { Accept: 'application/json' } }),
+        catch: () => new TpexEsbNetworkError(),
+      }).pipe(
+        Effect.timeoutFail({
+          duration: Duration.millis(UPSTREAM_TIMEOUT_MS),
+          onTimeout: () => new TpexEsbTimeoutError(),
+        }),
+      );
+      if (!response.ok) {
+        return yield* new TpexEsbHttpError({ status: response.status });
+      }
+
+      const raw = yield* Effect.tryPromise({
+        try: () => response.json() as Promise<unknown>,
+        catch: () => new TpexEsbDecodeError({ stage: 'json' }),
+      });
+      const snapshot = yield* Schema.decodeUnknown(TpexEsbSnapshotSchema)(raw).pipe(
+        Effect.mapError(() => new TpexEsbDecodeError({ stage: 'schema' })),
+      );
+      yield* this.cache.setJson(ESB_SNAPSHOT_CACHE_KEY, snapshot, ESB_SNAPSHOT_CACHE_TTL_SECONDS);
+      return snapshot;
     });
   }
 }

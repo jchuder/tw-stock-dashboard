@@ -3,6 +3,7 @@ import type { Security } from '@tw-stock-dashboard/contracts';
 import { StockNotFoundError } from '../../libs/securities/universe.error.js';
 import type { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CacheService } from '../../libs/cache/cache.service.js';
 import type { PinoLogger } from 'nestjs-pino';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
@@ -25,7 +26,7 @@ function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
-    new TpexEsbQuoteProvider(),
+    new TpexEsbQuoteProvider(new CacheService()),
     new StockQuoteCache(),
     fakeUniverse(),
     silentLogger(),

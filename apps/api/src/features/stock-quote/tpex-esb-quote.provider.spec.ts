@@ -1,6 +1,7 @@
 import { Effect, Either } from 'effect';
+import type { CacheService } from '../../libs/cache/cache.service.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import { ESB_SNAPSHOT_CACHE_KEY, ESB_SNAPSHOT_CACHE_TTL_SECONDS, TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 
 const ROW_7883 = {
   Date: '1150907',
@@ -42,12 +43,30 @@ const EXPECTED_QUOTE = {
   limitDownPrice: null,
 };
 
-function okOnce(body: unknown, status = 200): void {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })));
+type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del'>;
+
+function makeCache(initial: Record<string, unknown> = {}): TestCache {
+  const values = new Map(Object.entries(initial));
+  return {
+    getJson: vi.fn((key: string) => Effect.succeed(values.get(key) ?? null)),
+    setJson: vi.fn((key: string, value: unknown) => {
+      values.set(key, value);
+      return Effect.succeed(undefined);
+    }),
+    del: vi.fn(() => Effect.succeed(undefined)),
+  };
 }
 
-function run(symbol = '7883') {
-  return Effect.runPromise(Effect.either(new TpexEsbQuoteProvider().getQuote(symbol)));
+function cachedProvider(cache = makeCache()): TpexEsbQuoteProvider {
+  return new TpexEsbQuoteProvider(cache);
+}
+
+function run(symbol = '7883', cache = makeCache()) {
+  return Effect.runPromise(Effect.either(cachedProvider(cache).getQuote(symbol)));
+}
+
+function okOnce(body: unknown, status = 200): void {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })));
 }
 
 describe('TpexEsbQuoteProvider typed failures', () => {
@@ -78,6 +97,52 @@ describe('TpexEsbQuoteProvider typed failures', () => {
         price: 290,
       });
     }
+  });
+
+  it('reuses one full-market snapshot across symbols within the shared TTL', async () => {
+    const cache = makeCache();
+    const row1260 = { ...ROW_7883, SecuritiesCompanyCode: '1260', CompanyName: '富味鄉' };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([ROW_7883, row1260]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = cachedProvider(cache);
+
+    const first = await Effect.runPromise(Effect.either(provider.getQuote('7883')));
+    const second = await Effect.runPromise(Effect.either(provider.getQuote('1260')));
+
+    expect(Either.isRight(first)).toBe(true);
+    expect(Either.isRight(second)).toBe(true);
+    if (Either.isRight(first) && Either.isRight(second)) {
+      expect(first.right.quote.symbol).toBe('7883');
+      expect(second.right.quote.symbol).toBe('1260');
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cache.getJson).toHaveBeenCalledTimes(2);
+    expect(cache.setJson).toHaveBeenCalledWith(
+      ESB_SNAPSHOT_CACHE_KEY,
+      expect.arrayContaining([
+        expect.objectContaining({ SecuritiesCompanyCode: '7883' }),
+        expect.objectContaining({ SecuritiesCompanyCode: '1260' }),
+      ]),
+      ESB_SNAPSHOT_CACHE_TTL_SECONDS,
+    );
+  });
+
+  it('refreshes and replaces an invalid cached snapshot', async () => {
+    const cache = makeCache({ [ESB_SNAPSHOT_CACHE_KEY]: { invalid: true } });
+    okOnce([ROW_7883]);
+
+    const result = await run('7883', cache);
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.symbol).toBe('7883');
+    }
+    expect(cache.del).toHaveBeenCalledWith(ESB_SNAPSHOT_CACHE_KEY);
+    expect(cache.setJson).toHaveBeenCalledWith(
+      ESB_SNAPSHOT_CACHE_KEY,
+      [expect.objectContaining({ SecuritiesCompanyCode: '7883' })],
+      ESB_SNAPSHOT_CACHE_TTL_SECONDS,
+    );
   });
   it('maps no-trade zero sentinels to null prices while preserving zero volume', async () => {
     okOnce([
