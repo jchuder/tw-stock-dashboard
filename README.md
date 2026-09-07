@@ -173,6 +173,25 @@ pnpm dev:web
 
 可參考專案根目錄之 `.env.example` 了解各項環境變數用途。
 
+### Docker 啟動（Production-like Compose）
+
+Docker Compose 會啟動 Nginx 靜態前端、NestJS API 與 Redis 共用快取。前端以同源 `/api` 與 `/health` 反向代理至 API，預設透過 `http://localhost:8088` 存取：
+
+```bash
+# 可選：在目前 shell 設定 FUGLE API Key
+export FUGLE_API_KEY=your-key
+
+docker compose up --build
+```
+
+開啟 `http://localhost:8088`；API 健康檢查為 `http://localhost:8088/health`。若需要其他主機埠，可設定 `WEB_PORT`，例如 `WEB_PORT=8090 docker compose up --build`。停止並移除容器：
+
+```bash
+docker compose down
+```
+
+未設定 `FUGLE_API_KEY` 時，API 仍會以公開資料模式啟動；Redis 僅提供效能快取，失效時會自動 bypass，不影響資料正確性。
+
 ### 外部 Demo 分享啟動（Cloudflare Quick Tunnel 模式）
 
 若需產生單一臨時公開網址供外部人員試用，專案提供透過 `mise` 一鍵建置並平行啟動前後端與 Cloudflare 通道：
