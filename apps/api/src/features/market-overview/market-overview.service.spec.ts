@@ -114,8 +114,9 @@ describe('MarketOverviewService', () => {
       };
 
       const result = classifyIndexState(candidate, now);
-      expect(result.state).toBe('intraday');
-      expect(result.asOf).toBe('2026-09-07T13:33:00+08:00');
+      expect(result).not.toBeNull();
+      expect(result?.state).toBe('intraday');
+      expect(result?.asOf).toBe('2026-09-07T13:33:00+08:00');
     });
 
     it('classifies as closed after 13:35:00 settlement window (e.g. 13:36:00 and 14:14 batch-gap)', () => {
@@ -142,7 +143,7 @@ describe('MarketOverviewService', () => {
       });
     });
 
-    it('classifies as closed before market open (e.g. 08:50:00)', () => {
+    it('returns null before market open (e.g. 08:50:00) to trigger fallback', () => {
       const now = new Date('2026-09-07T08:50:00+08:00');
       const candidate: RawMisIndexCandidate = {
         symbol: 't00',
@@ -155,11 +156,10 @@ describe('MarketOverviewService', () => {
       };
 
       const result = classifyIndexState(candidate, now);
-      expect(result.state).toBe('closed');
-      expect(result.asOf).toBeNull();
+      expect(result).toBeNull();
     });
 
-    it('classifies as closed if candidate date is from previous trading day', () => {
+    it('returns null if candidate date is from previous trading day', () => {
       const now = new Date('2026-09-07T09:15:00+08:00');
       const candidate: RawMisIndexCandidate = {
         symbol: 't00',
@@ -172,9 +172,23 @@ describe('MarketOverviewService', () => {
       };
 
       const result = classifyIndexState(candidate, now);
-      expect(result.state).toBe('closed');
-      expect(result.tradeDate).toBe('2026-09-04');
-      expect(result.asOf).toBeNull();
+      expect(result).toBeNull();
+    });
+
+    it('rejects stale-today candidate (e.g. 10:00:00 snapshot observed at 14:14:00) by returning null', () => {
+      const now = new Date('2026-09-07T14:14:00+08:00');
+      const candidate: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 46500.0,
+        change: -51.13,
+        changePercent: -0.11,
+        tradeDate: '2026-09-07',
+        time: '10:00:00',
+        asOf: '2026-09-07T10:00:00+08:00',
+      };
+
+      const result = classifyIndexState(candidate, now);
+      expect(result).toBeNull();
     });
   });
 
@@ -271,6 +285,93 @@ describe('MarketOverviewService', () => {
 
       expect(twseProvider.getTaiex).not.toHaveBeenCalled();
       expect(tpexProvider.getOtc).toHaveBeenCalledOnce();
+    });
+
+    it('falls back partially when MIS has OTC but is missing TAIEX', async () => {
+      vi.spyOn(misProvider, 'getIndices').mockReturnValue(
+        Effect.succeed({
+          taiex: null,
+          otc: mockMisOtcCandidate,
+        }),
+      );
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
+      vi.spyOn(tpexProvider, 'getOtc');
+      vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
+        Effect.succeed(mockInstitutional),
+      );
+
+      const now = new Date('2026-09-07T14:14:00+08:00');
+      const result = await Effect.runPromise(Effect.either(service.getOverview(now)));
+      expect(Either.isRight(result)).toBe(true);
+      if (Either.isRight(result)) {
+        expect(result.right.taiex).toEqual(mockOpenApiTaiex);
+        expect(result.right.taiex.source).toBe('twse');
+        expect(result.right.otc.source).toBe('twse-mis');
+      }
+
+      expect(twseProvider.getTaiex).toHaveBeenCalledOnce();
+      expect(tpexProvider.getOtc).not.toHaveBeenCalled();
+    });
+
+    it('falls back to TWSE OpenAPI when MIS candidate is stale-today (10:00 snapshot at 14:14)', async () => {
+      const now = new Date('2026-09-07T14:14:00+08:00');
+      const staleTaiex: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 46500.0,
+        change: -51.13,
+        changePercent: -0.11,
+        tradeDate: '2026-09-07',
+        time: '10:00:00',
+        asOf: '2026-09-07T10:00:00+08:00',
+      };
+
+      vi.spyOn(misProvider, 'getIndices').mockReturnValue(
+        Effect.succeed({
+          taiex: staleTaiex,
+          otc: mockMisOtcCandidate,
+        }),
+      );
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
+      vi.spyOn(tpexProvider, 'getOtc');
+      vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
+        Effect.succeed(mockInstitutional),
+      );
+
+      const result = await Effect.runPromise(Effect.either(service.getOverview(now)));
+      expect(Either.isRight(result)).toBe(true);
+      if (Either.isRight(result)) {
+        // TAIEX must fallback to TWSE OpenAPI (46551.13, 2026-09-04), NOT 46500 closed on 2026-09-07!
+        expect(result.right.taiex).toEqual(mockOpenApiTaiex);
+        expect(result.right.taiex.source).toBe('twse');
+        expect(result.right.taiex.tradeDate).toBe('2026-09-04');
+        // OTC has healthy 13:33 snapshot, so it remains MIS closed
+        expect(result.right.otc.source).toBe('twse-mis');
+        expect(result.right.otc.state).toBe('closed');
+      }
+
+      expect(twseProvider.getTaiex).toHaveBeenCalledOnce();
+      expect(tpexProvider.getOtc).not.toHaveBeenCalled();
+    });
+
+    it('allows valid mixed dates (e.g. TAIEX/OTC at 2026-09-07 and Institutional at 2026-09-04)', async () => {
+      const now = new Date('2026-09-07T14:14:00+08:00');
+      vi.spyOn(misProvider, 'getIndices').mockReturnValue(
+        Effect.succeed({
+          taiex: mockMisTaiexCandidate,
+          otc: mockMisOtcCandidate,
+        }),
+      );
+      vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
+        Effect.succeed(mockInstitutional),
+      );
+
+      const result = await Effect.runPromise(Effect.either(service.getOverview(now)));
+      expect(Either.isRight(result)).toBe(true);
+      if (Either.isRight(result)) {
+        expect(result.right.taiex.tradeDate).toBe('2026-09-07');
+        expect(result.right.otc.tradeDate).toBe('2026-09-07');
+        expect(result.right.institutional.asOf).toBe('2026-09-04');
+      }
     });
 
     it('fails if institutional flow fails', async () => {

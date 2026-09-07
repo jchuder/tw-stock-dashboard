@@ -3,7 +3,7 @@ import { Schema } from 'effect';
 export const MarketSnapshotStateSchema = Schema.Literal('intraday', 'closed');
 export type MarketSnapshotState = Schema.Schema.Type<typeof MarketSnapshotStateSchema>;
 
-export const MarketIndexSourceSchema = Schema.Literal('fugle', 'twse-mis', 'twse', 'tpex');
+export const MarketIndexSourceSchema = Schema.Literal('twse-mis', 'twse', 'tpex');
 export type MarketIndexSource = Schema.Schema.Type<typeof MarketIndexSourceSchema>;
 
 export const MarketIndexSnapshotSchema = Schema.Struct({

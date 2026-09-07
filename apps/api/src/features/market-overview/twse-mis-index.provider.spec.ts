@@ -62,7 +62,7 @@ describe('TwseMisIndexProvider', () => {
     }
   });
 
-  it('returns null for missing candidate when only one is present', async () => {
+  it('returns null for missing candidate when only one is present (OTC missing)', async () => {
     const mockPayload = {
       msgArray: [
         {
@@ -86,6 +86,94 @@ describe('TwseMisIndexProvider', () => {
     if (Either.isRight(result)) {
       expect(result.right.taiex).not.toBeNull();
       expect(result.right.otc).toBeNull();
+    }
+  });
+
+  it('returns null for missing candidate when only OTC is present (TAIEX missing)', async () => {
+    const mockPayload = {
+      msgArray: [
+        {
+          c: 'o00',
+          n: '櫃買指數',
+          z: '409.33',
+          y: '402.48',
+          d: '20260907',
+          t: '13:33:00',
+        },
+      ],
+      rtcode: '0000',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockPayload), { status: 200 }),
+    );
+
+    const result = await Effect.runPromise(Effect.either(provider.getIndices()));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.taiex).toBeNull();
+      expect(result.right.otc).not.toBeNull();
+    }
+  });
+
+  it('returns null candidate when value is malformed (e.g. z or y is not a valid number)', async () => {
+    const mockPayload = {
+      msgArray: [
+        {
+          c: 't00',
+          n: '加權指數',
+          z: '--',
+          y: '46,551.13',
+          d: '20260907',
+          t: '13:33:00',
+        },
+        {
+          c: 'o00',
+          n: '櫃買指數',
+          z: '409.33',
+          y: '0.00',
+          d: '20260907',
+          t: '13:33:00',
+        },
+      ],
+      rtcode: '0000',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockPayload), { status: 200 }),
+    );
+
+    const result = await Effect.runPromise(Effect.either(provider.getIndices()));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.taiex).toBeNull();
+      expect(result.right.otc).toBeNull();
+    }
+  });
+
+  it('returns null candidate when date is malformed', async () => {
+    const mockPayload = {
+      msgArray: [
+        {
+          c: 't00',
+          n: '加權指數',
+          z: '47,326.27',
+          y: '46,551.13',
+          d: 'invalid-date',
+          t: '13:33:00',
+        },
+      ],
+      rtcode: '0000',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockPayload), { status: 200 }),
+    );
+
+    const result = await Effect.runPromise(Effect.either(provider.getIndices()));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.taiex).toBeNull();
     }
   });
 

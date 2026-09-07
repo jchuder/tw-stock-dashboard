@@ -46,8 +46,11 @@ export const ACTIVE_POLLING_INTERVAL_MS = 30_000;
  * Checks if the given time falls into the regular weekday trading window
  * (Monday to Friday 08:55:00 ~ 13:35:00 Asia/Taipei).
  *
- * Note: This represents the regular weekly market window and does not
- * account for official TWSE national holiday closures or special trading days.
+ * Market timing rules:
+ * - 正常 13:30 收盤；極端情況可能因暫緩收盤延至 13:33，系統保守至 13:35 才將 MIS 快照視為 final close。
+ * - 08:55:00 開始至 13:35:00 維持 30 秒即時輪詢。
+ * - Note: This represents the regular weekly market window and does not
+ *   account for official TWSE national holiday closures or special trading days.
  */
 export function isTaipeiTradingWindow(now = new Date()): boolean {
   const taipeiDate = new Date(now.getTime() + TAIPEI_OFFSET_MS);
