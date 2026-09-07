@@ -338,4 +338,84 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
     });
     expect(res.body.candles.length).toBeGreaterThan(0);
   });
+
+  it('does NOT fallback to official provider when Fugle returns 400 bad request', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes('api.fugle.tw')) {
+        return new Response('Bad Request', { status: 400 });
+      }
+      return new Response('Should not be called', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/history?range=1m').expect(500);
+
+    expect(res.body).toEqual(GENERIC_FAILURE);
+    // Verified that official TWSE/TPEx was NOT called
+    const twseCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes('twse.com.tw'));
+    expect(twseCalls.length).toBe(0);
+  });
+
+  it('falls back to official provider when Fugle returns 503 service unavailable', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const twseData = {
+      stat: 'OK',
+      data: [
+        ['115/07/01', '10,000,000', '1,000,000', '1,000.00', '1,050.00', '990.00', '1,040.00', '+40.00', '1,000'],
+        ['115/08/06', '12,000,000', '1,200,000', '1,040.00', '1,060.00', '1,030.00', '1,050.00', '+10.00', '1,200'],
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('api.fugle.tw')) {
+          return new Response('Service Unavailable', { status: 503 });
+        }
+        if (url.includes('twse.com.tw')) {
+          return new Response(JSON.stringify(twseData), { status: 200 });
+        }
+        return new Response('Not Found', { status: 404 });
+      }),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/history?range=1m').expect(200);
+
+    expect(res.body.source).toEqual({
+      provider: 'twse',
+      mode: 'eod',
+      asOf: '2026-08-06',
+    });
+    expect(res.body.candles.length).toBeGreaterThan(0);
+  });
+
+  it('treats placeholder key your_fugle_api_key_here as unconfigured and falls back to official provider without calling Fugle', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'your_fugle_api_key_here');
+    const twseData = {
+      stat: 'OK',
+      data: [
+        ['115/07/01', '10,000,000', '1,000,000', '1,000.00', '1,050.00', '990.00', '1,040.00', '+40.00', '1,000'],
+        ['115/08/06', '12,000,000', '1,200,000', '1,040.00', '1,060.00', '1,030.00', '1,050.00', '+10.00', '1,200'],
+      ],
+    };
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes('api.fugle.tw')) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      if (url.includes('twse.com.tw')) {
+        return new Response(JSON.stringify(twseData), { status: 200 });
+      }
+      return new Response('Not Found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/history?range=1m').expect(200);
+
+    expect(res.body.source.provider).toBe('twse');
+    const fugleCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes('api.fugle.tw'));
+    expect(fugleCalls.length).toBe(0);
+  });
 });

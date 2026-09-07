@@ -9,7 +9,7 @@ import { enumerateMonths } from './history-window.js';
 
 export const TWSE_STOCK_DAY_URL = 'https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY';
 export const TPEX_TRADING_STOCK_URL = 'https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock';
-const UPSTREAM_TIMEOUT_MS = 4000;
+const UPSTREAM_TIMEOUT_MS = 3000;
 
 function parseRocDate(rocDateStr: string): string {
   const trimmed = rocDateStr.trim();
@@ -105,9 +105,12 @@ export class OfficialDailyHistoryProvider {
     }
 
     return Effect.gen(this, function* () {
-      const isTwse = yield* this.isTwseSymbol(symbol, months);
+      const market = yield* this.resolveMarket(symbol, months);
+      if (!market) {
+        return yield* new StockHistoryNotFoundError({ symbol });
+      }
 
-      if (isTwse) {
+      if (market === 'TWSE') {
         const chunkResults = yield* Effect.all(
           months.map((m) => this.fetchTwseMonth(symbol, m)),
           { concurrency: 3 },
@@ -124,47 +127,38 @@ export class OfficialDailyHistoryProvider {
         };
       }
 
-      const isTpex = yield* this.isTpexSymbol(symbol, months);
-      if (isTpex) {
-        const chunkResults = yield* Effect.all(
-          months.map((m) => this.fetchTpexMonth(symbol, m)),
-          { concurrency: 3 },
+      const chunkResults = yield* Effect.all(
+        months.map((m) => this.fetchTpexMonth(symbol, m)),
+        { concurrency: 3 },
+      );
+      const merged = chunkResults.flat();
+      if (merged.length === 0) {
+        return yield* new StockHistoryNotFoundError({ symbol });
+      }
+      return {
+        symbol,
+        market: 'TPEX' as const,
+        provider: 'tpex' as const,
+        candles: dedupeAndSort(merged),
+      };
+    });
+  }
+
+  private resolveMarket(
+    symbol: string,
+    months: string[],
+  ): Effect.Effect<'TWSE' | 'TPEX' | null, OfficialDailyHistoryError> {
+    const probeMonths = [...months].reverse().slice(0, 3);
+    return Effect.gen(this, function* () {
+      for (const month of probeMonths) {
+        const [twseHas, tpexHas] = yield* Effect.all(
+          [this.checkTwseSymbol(symbol, month), this.checkTpexSymbol(symbol, month)],
+          { concurrency: 2 },
         );
-        const merged = chunkResults.flat();
-        if (merged.length === 0) {
-          return yield* new StockHistoryNotFoundError({ symbol });
-        }
-        return {
-          symbol,
-          market: 'TPEX' as const,
-          provider: 'tpex' as const,
-          candles: dedupeAndSort(merged),
-        };
+        if (twseHas) return 'TWSE';
+        if (tpexHas) return 'TPEX';
       }
-
-      return yield* new StockHistoryNotFoundError({ symbol });
-    });
-  }
-
-  private isTwseSymbol(symbol: string, months: string[]): Effect.Effect<boolean, OfficialDailyHistoryError> {
-    const reversed = [...months].reverse().slice(0, 2);
-    return Effect.gen(this, function* () {
-      for (const m of reversed) {
-        const found = yield* this.checkTwseSymbol(symbol, m);
-        if (found) return true;
-      }
-      return false;
-    });
-  }
-
-  private isTpexSymbol(symbol: string, months: string[]): Effect.Effect<boolean, OfficialDailyHistoryError> {
-    const reversed = [...months].reverse().slice(0, 2);
-    return Effect.gen(this, function* () {
-      for (const m of reversed) {
-        const found = yield* this.checkTpexSymbol(symbol, m);
-        if (found) return true;
-      }
-      return false;
+      return null;
     });
   }
 
@@ -241,7 +235,9 @@ export class OfficialDailyHistoryProvider {
     return Effect.tryPromise({
       try: async (signal) => {
         const res = await fetch(url, { signal });
-        if (!res.ok) return [];
+        if (!res.ok) {
+          throw new Error(`TPEx returned HTTP ${res.status}`);
+        }
         const json = (await res.json()) as { stat?: string; tables?: Array<{ data?: unknown }> };
         const data = json.tables?.[0]?.data;
         if (json.stat !== 'ok' || !Array.isArray(data)) return [];

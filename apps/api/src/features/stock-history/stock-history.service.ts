@@ -20,6 +20,25 @@ import {
 import { applyMovingAverages } from './moving-average.js';
 import type { BaseCandle } from './moving-average.js';
 
+function isFugleKeyPresent(): boolean {
+  const key = process.env.FUGLE_API_KEY?.trim();
+  return Boolean(key && key !== 'your_fugle_api_key_here');
+}
+
+export function isEligibleFugleDailyFallback(err: StockHistoryServiceError): boolean {
+  if (
+    err._tag === 'FugleHistoryNetworkError' ||
+    err._tag === 'FugleHistoryTimeoutError' ||
+    err._tag === 'FugleHistoryDecodeError'
+  ) {
+    return true;
+  }
+  if (err._tag === 'FugleHistoryHttpError') {
+    return err.status === 429 || (err.status >= 500 && err.status <= 599);
+  }
+  return false;
+}
+
 @Injectable()
 export class StockHistoryService {
   constructor(
@@ -38,7 +57,7 @@ export class StockHistoryService {
     symbol: string,
     range: '1d' | '3d' | '5d',
   ): Effect.Effect<StockHistoryResponse, StockHistoryServiceError> {
-    const hasKey = Boolean(process.env.FUGLE_API_KEY);
+    const hasKey = isFugleKeyPresent();
     if (!hasKey) {
       return Effect.fail(new IntradayRangeUnavailableError());
     }
@@ -80,7 +99,7 @@ export class StockHistoryService {
       const nowMs = yield* Clock.currentTimeMillis;
       const visible = historyWindow(range, nowMs);
       const warmupFrom = shiftCalendarMonths(visible.from, -WARMUP_MONTHS);
-      const hasKey = Boolean(process.env.FUGLE_API_KEY);
+      const hasKey = isFugleKeyPresent();
 
       if (hasKey) {
         const fugleAttempt = Effect.gen(this, function* () {
@@ -110,11 +129,7 @@ export class StockHistoryService {
 
         return yield* fugleAttempt.pipe(
           Effect.catchAll((err) => {
-            if (
-              err._tag === 'FugleHistoryHttpError' &&
-              err.status !== 429 &&
-              (err.status < 500 || err.status > 599)
-            ) {
+            if (!isEligibleFugleDailyFallback(err)) {
               return Effect.fail(err);
             }
             return this.getOfficialDailyHistory(symbol, range, warmupFrom, visible.from, visible.to);

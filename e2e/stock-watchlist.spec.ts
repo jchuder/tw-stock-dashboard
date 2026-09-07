@@ -23,6 +23,7 @@ const QUOTE_2330 = {
   source: {
     provider: 'fugle',
     fallbackUsed: false,
+    fallbackReason: null,
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -41,6 +42,7 @@ const QUOTE_2454 = {
   source: {
     provider: 'fugle',
     fallbackUsed: false,
+    fallbackReason: null,
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -55,6 +57,11 @@ function makeCandles(symbol: string, range = '1d') {
     range,
     timeframe: intraday ? '5m' : '1d',
     volumeUnit: intraday ? 'lot' : 'share',
+    source: {
+      provider: 'fugle',
+      mode: intraday ? 'intraday' : 'eod',
+      asOf: intraday ? null : '2026-08-06',
+    },
     candles: intraday
       ? [
           { date: '2026-09-04T09:00:00.000+08:00', open: 551, high: 561, low: 541, close: 555, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },

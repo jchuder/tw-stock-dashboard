@@ -27,8 +27,8 @@ const FUGLE_TICKER_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/ti
 export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
   getQuote(symbol: string): Effect.Effect<QuoteProviderResult, FugleQuoteError> {
     return Effect.gen(function* () {
-      const apiKey = process.env.FUGLE_API_KEY;
-      if (!apiKey) {
+      const apiKey = process.env.FUGLE_API_KEY?.trim();
+      if (!apiKey || apiKey === 'your_fugle_api_key_here') {
         return yield* new FugleConfigError();
       }
 

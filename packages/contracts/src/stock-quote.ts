@@ -33,8 +33,8 @@ export type StockQuote = Schema.Schema.Type<typeof StockQuoteSchema>;
 export const StockQuoteSourceSchema = Schema.Struct({
   provider: Schema.Literal('fugle', 'twse-mis'),
   fallbackUsed: Schema.Boolean,
-  fallbackReason: Schema.optional(
-    Schema.NullOr(Schema.Literal('config_missing', 'upstream_unavailable')),
+  fallbackReason: Schema.NullOr(
+    Schema.Literal('config_missing', 'upstream_unavailable'),
   ),
   fetchedAt: Schema.String,
   asOf: Schema.NullOr(Schema.String),

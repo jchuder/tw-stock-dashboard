@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
-import type { Candle, HistoryRange } from '@tw-stock-dashboard/contracts';
+import type { Candle, HistoryRange, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
 import { fetchStockHistory } from '../api/stock-history.api.js';
 import { StockHistoryChart } from './stock-history-chart.js';
 import type { MaVisibility } from './stock-history-chart.js';
@@ -42,6 +42,19 @@ export interface HistoryControls {
   maVisibility: MaVisibility;
   onToggleMa: (key: keyof MaVisibility) => void;
   isPublicDataMode?: boolean;
+}
+
+export function formatChartSourceText(source: StockHistoryResponse['source']): string {
+  const providerLabel =
+    source.provider === 'fugle' ? 'Fugle' : source.provider === 'twse' ? 'TWSE' : 'TPEx';
+  const modeLabel =
+    source.mode === 'intraday'
+      ? '即時 5 分 K'
+      : source.provider === 'fugle'
+        ? '盤後日 K'
+        : '官方盤後日 K';
+  const asOfText = source.asOf ? ` · 更新至 ${source.asOf.replace(/-/g, '/')}` : '';
+  return `${providerLabel} · ${modeLabel}${asOfText}`;
 }
 
 // Focus-card section: MA legend, chart, then periods below the chart. Plain
@@ -122,13 +135,7 @@ export function StockHistoryFocus({
                   color: '#4e5551',
                 }}
               >
-                資料來源：
-                {history.data.source.provider === 'fugle'
-                  ? 'Fugle'
-                  : history.data.source.provider === 'twse'
-                    ? 'TWSE'
-                    : 'TPEx'}{' '}
-                {history.data.source.mode === 'intraday' ? '即時 5 分 K' : '官方盤後日 K'}
+                {formatChartSourceText(history.data.source)}
               </span>
             )}
           </div>

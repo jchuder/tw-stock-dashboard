@@ -23,6 +23,7 @@ const FUGLE_BODY = {
   source: {
     provider: 'fugle',
     fallbackUsed: false,
+    fallbackReason: null,
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -41,6 +42,7 @@ const MIS_BODY = {
   source: {
     provider: 'twse-mis',
     fallbackUsed: true,
+    fallbackReason: 'upstream_unavailable',
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -184,6 +186,7 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
         source: {
           provider: 'twse-mis',
           fallbackUsed: true,
+          fallbackReason: 'upstream_unavailable',
           fetchedAt: '2026-09-06T04:00:00.000Z',
           asOf: '2026-09-04T05:35:00.000Z',
           cacheHit: false,
@@ -293,6 +296,6 @@ test('public data mode shows persistent banner, disables 5m candles, and updates
   const oneMonthBtn = page.getByRole('button', { name: '1M' });
   await expect(oneMonthBtn).toHaveClass(/active/);
 
-  // 6. Chart source badge shows TWSE 官方盤後日 K
-  await expect(page.getByTestId('chart-source-badge')).toContainText('TWSE 官方盤後日 K');
+  // 6. Chart source badge shows TWSE · 官方盤後日 K · 更新至 2026/09/04
+  await expect(page.getByTestId('chart-source-badge')).toHaveText('TWSE · 官方盤後日 K · 更新至 2026/09/04');
 });

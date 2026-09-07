@@ -48,6 +48,7 @@ const QUOTE_2330 = {
   source: {
     provider: 'fugle',
     fallbackUsed: false,
+    fallbackReason: null,
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -60,6 +61,11 @@ const CANDLES_2330 = {
   range: '1d',
   timeframe: '5m',
   volumeUnit: 'lot',
+  source: {
+    provider: 'fugle',
+    mode: 'intraday',
+    asOf: null,
+  },
   candles: [
     { date: '2026-09-04T09:00:00.000+08:00', open: 2300, high: 2320, low: 2280, close: 2310, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
     { date: '2026-09-04T09:05:00.000+08:00', open: 2310, high: 2330, low: 2300, close: 2320, volume: 900, ma5: 2315, ma10: null, ma20: null, ma60: null },

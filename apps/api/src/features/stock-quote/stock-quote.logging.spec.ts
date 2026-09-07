@@ -189,4 +189,23 @@ describe('stock quote domain logs', () => {
       },
     ]);
   });
+
+  it('logs fallback event at info level when FUGLE_API_KEY is missing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(MIS_BODY)));
+
+    await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expect(entriesOf(captured, 'info', 'market_data_fallback')).toEqual([
+      {
+        event: 'market_data_fallback',
+        operation: 'quote',
+        symbol: '2330',
+        from_provider: 'fugle',
+        to_provider: 'twse-mis',
+        fallback_reason: 'config_missing',
+        reason: 'config_missing',
+      },
+    ]);
+    expect(entriesOf(captured, 'warn', 'market_data_fallback')).toHaveLength(0);
+  });
 });

@@ -118,16 +118,17 @@ flowchart TB
 
 | 功能項目 | 資料來源 | 降級備援機制 | 快取策略 |
 | :--- | :--- | :--- | :--- |
-| 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（盤中行情與漲跌停 ground truth） | TWSE MIS（限 transient/eligible 異常，取 o/h/l/v/u/w/z/y 盤中快照） | 5 秒 in-memory TTL 快取 |
-| 歷史 K 線（History） | 富果 Fugle MarketData API | 無（Fugle only，未配置金鑰回傳 500） | 不快取（無快取） |
+| 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（盤中行情與漲跌停 ground truth） | TWSE MIS（未配置金鑰或 upstream 異常自動平滑降級） | 5 秒 in-memory TTL 快取 |
+| 歷史 K 線（History） | 富果 Fugle MarketData API（提供 5 分 K 與日 K） | TWSE / TPEx 官方盤後日線（未配置金鑰或 5xx 降級，限日 K） | 不快取（無快取） |
 | 加權指數（TAIEX） | TWSE MIS（單次批次抓取即時行情） | TWSE OpenAPI（日終盤後 EOD 數據平滑降級） | 30 秒動態輪詢，不快取 |
 | 櫃買指數（OTC） | TWSE MIS（單次批次抓取即時行情） | TPEx OpenAPI（日終盤後 EOD 數據平滑降級） | 30 秒動態輪詢，不快取 |
 | 三大法人買賣超 | TWSE BFI82U JSON endpoint（日終盤後 EOD 數據） | 無 | 不快取 |
 
 ### 重要說明
 
-1. 個股分析功能（報價與歷史線圖）需要設定 `FUGLE_API_KEY`。若未設定金鑰，系統回傳 500 錯誤且不會降級備援。
-2. TWSE 與 TPEx 官方公開端點主要於交易日收盤後更新當日 EOD 數據，顯示最近一個有效交易日之收盤資訊。
+1. **公開資料模式（Public Data Mode）**：若未配置 `FUGLE_API_KEY`，系統自動啟用公開資料模式。個股即時報價改由 TWSE MIS 提供，歷史走勢改由 TWSE 與 TPEx 官方公開日線提供，並在焦點個股頂部常駐顯示琥珀色揭露橫幅；因官方端點不提供盤中分 K，1D/3D/5D 按鈕將自動停用並提示需配置 Fugle API Key。
+2. **Enhanced Mode**：配置有效之 `FUGLE_API_KEY` 時，啟用富果盤中 5 分 K 與高頻即時報價完整功能。
+3. TWSE 與 TPEx 官方公開端點主要於交易日收盤後更新當日 EOD 數據，顯示最近一個有效交易日之收盤資訊。
 
 ## 安裝與快速啟動
 

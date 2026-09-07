@@ -83,7 +83,7 @@ export class StockQuoteService {
                 ? ('config_missing' as const)
                 : ('upstream_unavailable' as const);
             const fallback = fallbackReason(error);
-            this.logger.warn({
+            const logPayload = {
               event: 'market_data_fallback',
               operation: 'quote',
               symbol,
@@ -91,7 +91,12 @@ export class StockQuoteService {
               to_provider: 'twse-mis',
               fallback_reason: reasonType,
               ...fallback,
-            });
+            };
+            if (reasonType === 'config_missing') {
+              this.logger.info(logPayload);
+            } else {
+              this.logger.warn(logPayload);
+            }
             addSpanEvent('market_data.fallback', {
               'stock.symbol': symbol,
               'market_data.from_provider': 'fugle',

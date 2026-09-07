@@ -41,6 +41,6 @@ export const StockHistoryResponseSchema = Schema.Struct({
   timeframe: TimeframeSchema,
   volumeUnit: VolumeUnitSchema,
   candles: Schema.Array(CandleSchema),
-  source: Schema.optional(StockHistorySourceSchema),
+  source: StockHistorySourceSchema,
 });
 export type StockHistoryResponse = Schema.Schema.Type<typeof StockHistoryResponseSchema>;
