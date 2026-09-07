@@ -144,7 +144,7 @@ export function StockAnalysis({
               onRangeChange={setRange}
               maVisibility={maVisibility}
               onToggleMa={onToggleMa}
-              isPublicDataMode={isPublicDataMode}
+              disableIntradayRanges={isPublicDataMode}
             />
           )}
         </div>
