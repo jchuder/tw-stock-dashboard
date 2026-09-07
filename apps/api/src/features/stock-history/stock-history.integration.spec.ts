@@ -26,6 +26,7 @@ const EXPECTED_CANDLES = [
     high: 2320,
     low: 2280,
     close: 2310,
+    average: null,
     volume: 28765432,
     ma5: null,
     ma10: null,
@@ -38,6 +39,7 @@ const EXPECTED_CANDLES = [
     high: 2330,
     low: 2300,
     close: 2320,
+    average: null,
     volume: 30123456,
     ma5: null,
     ma10: null,
@@ -90,6 +92,7 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
       range: '1m',
       timeframe: '1d',
       volumeUnit: 'share',
+      priceBasis: 'close',
       candles: EXPECTED_CANDLES,
       source: {
         provider: 'fugle',

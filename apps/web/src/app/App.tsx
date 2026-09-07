@@ -9,7 +9,7 @@ import { formatTaipeiDateTime } from '../shared/datetime/format-taipei.js';
 import './app.css';
 
 export interface QuoteProvenance {
-  provider: 'fugle' | 'twse-mis';
+  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
   asOf: string | null;
   fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
 }
@@ -17,6 +17,7 @@ export interface QuoteProvenance {
 const PROVIDER_LABELS = {
   fugle: 'Fugle API Connected',
   'twse-mis': 'TWSE MIS',
+  'tpex-esb': 'TPEX ESB',
 } as const;
 
 export function App(): JSX.Element {

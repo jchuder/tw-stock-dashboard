@@ -30,7 +30,7 @@ export function StockAnalysis({
   onSymbolSubmitted: (symbol: string) => void;
   onProvenance?: (
     provenance: {
-      provider: 'fugle' | 'twse-mis';
+      provider: 'fugle' | 'twse-mis' | 'tpex-esb';
       asOf: string | null;
       fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
     } | null,

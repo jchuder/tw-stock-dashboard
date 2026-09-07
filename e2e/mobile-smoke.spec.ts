@@ -34,7 +34,8 @@ const QUOTE_2330 = {
   name: '台積電',
   market: 'TWSE',
   price: 2410,
-  previousClose: 2390,
+  referencePrice: 2390,
+  referencePriceType: 'previous_close',
   change: 20,
   changePercent: 0.84,
   tradeDate: '2026-09-04',
@@ -61,14 +62,15 @@ const CANDLES_2330 = {
   range: '1d',
   timeframe: '5m',
   volumeUnit: 'lot',
+  priceBasis: 'close',
   source: {
     provider: 'fugle',
     mode: 'intraday',
     asOf: null,
   },
   candles: [
-    { date: '2026-09-04T09:00:00.000+08:00', open: 2300, high: 2320, low: 2280, close: 2310, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
-    { date: '2026-09-04T09:05:00.000+08:00', open: 2310, high: 2330, low: 2300, close: 2320, volume: 900, ma5: 2315, ma10: null, ma20: null, ma60: null },
+    { date: '2026-09-04T09:00:00.000+08:00', open: 2300, high: 2320, low: 2280, close: 2310, average: null, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
+    { date: '2026-09-04T09:05:00.000+08:00', open: 2310, high: 2330, low: 2300, close: 2320, average: null, volume: 900, ma5: 2315, ma10: null, ma20: null, ma60: null },
   ],
 };
 

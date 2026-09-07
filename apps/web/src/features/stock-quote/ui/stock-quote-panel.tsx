@@ -10,13 +10,24 @@ const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugl
 const MARKET_LABELS = {
   TWSE: '上市',
   TPEX: '上櫃',
+  ESB: '興櫃',
 } as const;
+
+const REFERENCE_LABELS = {
+  previous_close: '前一交易日收盤',
+  previous_average: '前一交易日均價',
+} as const;
+
+function formatReference(referencePrice: number | null, referencePriceType: 'previous_close' | 'previous_average'): string {
+  return `${REFERENCE_LABELS[referencePriceType]} ${referencePrice === null ? '—' : referencePrice.toLocaleString()}`;
+}
 
 const COLOR_UP = '#d94b45';
 const COLOR_DOWN = '#169a52';
 const COLOR_FLAT = '#59605c';
 
-function changeClass(value: number): string {
+function changeClass(value: number | null): string {
+  if (value === null) return 'price-neutral';
   if (value > 0) return 'price-up';
   if (value < 0) return 'price-down';
   return 'price-neutral';
@@ -30,7 +41,7 @@ function formatNullable(value: number | null): string {
 }
 
 export interface QuoteResolvedInfo {
-  provider: 'fugle' | 'twse-mis';
+  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
   asOf: string | null;
   fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
   fallbackUsed: boolean;
@@ -52,7 +63,7 @@ export function StockQuotePanel({
   isInWatchlist?: boolean;
   onToggleWatchlist?: () => void;
 }): JSX.Element {
-  const previousProvider = useRef<'fugle' | 'twse-mis' | null>(null);
+  const previousProvider = useRef<'fugle' | 'twse-mis' | 'tpex-esb' | null>(null);
 
   const quote = useQuery({
     queryKey: ['stock-quote', requestedSymbol, searchSeq],
@@ -156,7 +167,7 @@ export function StockQuotePanel({
           </div>
           <div
             role="group"
-            aria-label={`目前股價 ${quote.data.price}，較前一交易日${quote.data.change > 0 ? '上漲' : quote.data.change < 0 ? '下跌' : '持平'} ${Math.abs(quote.data.change)}，漲跌幅 ${quote.data.changePercent}%`}
+            aria-label={describePriceMove(quote.data.price, quote.data.change, quote.data.changePercent)}
             style={{
               display: 'flex',
               alignItems: 'baseline',
@@ -187,15 +198,15 @@ export function StockQuotePanel({
               marginBottom: '4px',
             }}
           >
-            <span>前一交易日收盤 {quote.data.previousClose}</span>
+            <span>{formatReference(quote.data.referencePrice, quote.data.referencePriceType)}</span>
             {source.cacheHit && <span className="badge-cache">快取</span>}
           </div>
           <div data-testid="focus-quote-grid" className="focus-quote-grid">
-            <QuoteCell label="開盤價" value={formatNullable(quote.data.openPrice)} compare={quote.data.openPrice} previousClose={quote.data.previousClose} />
-            <QuoteCell label="最高價" value={formatNullable(quote.data.highPrice)} compare={quote.data.highPrice} previousClose={quote.data.previousClose} />
-            <QuoteCell label="最低價" value={formatNullable(quote.data.lowPrice)} compare={quote.data.lowPrice} previousClose={quote.data.previousClose} />
+            <QuoteCell label="開盤價" value={formatNullable(quote.data.openPrice)} compare={quote.data.openPrice} referencePrice={quote.data.referencePrice} />
+            <QuoteCell label="最高價" value={formatNullable(quote.data.highPrice)} compare={quote.data.highPrice} referencePrice={quote.data.referencePrice} />
+            <QuoteCell label="最低價" value={formatNullable(quote.data.lowPrice)} compare={quote.data.lowPrice} referencePrice={quote.data.referencePrice} />
             <QuoteCell
-              label="成交量（張）"
+              label={quote.data.tradeVolumeUnit === 'share' ? '成交量（股）' : '成交量（張）'}
               value={quote.data.tradeVolume === null ? '—' : quote.data.tradeVolume.toLocaleString()}
             />
             <QuoteCell label="漲停價" value={formatNullable(quote.data.limitUpPrice)} tone="up" />
@@ -207,13 +218,27 @@ export function StockQuotePanel({
   );
 }
 
+function describePriceMove(price: number, change: number | null, changePercent: number | null): string {
+  if (change === null || changePercent === null) {
+    return `目前股價 ${price}，漲跌 —`;
+  }
+  return `目前股價 ${price}，較前一交易日${change > 0 ? '上漲' : change < 0 ? '下跌' : '持平'} ${Math.abs(change)}，漲跌幅 ${changePercent}%`;
+}
+
 function ChangeLine({
   change,
   changePercent,
 }: {
-  change: number;
-  changePercent: number;
+  change: number | null;
+  changePercent: number | null;
 }): JSX.Element {
+  if (change === null || changePercent === null) {
+    return (
+      <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_FLAT }}>
+        —
+      </span>
+    );
+  }
   if (change > 0) {
     return (
       <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_UP }}>
@@ -239,13 +264,13 @@ function QuoteCell({
   label,
   value,
   compare,
-  previousClose,
+  referencePrice,
   tone,
 }: {
   label: string;
   value: string;
   compare?: number | null;
-  previousClose?: number;
+  referencePrice?: number | null;
   tone?: 'up' | 'down';
 }): JSX.Element {
   let toneClass = '';
@@ -253,8 +278,8 @@ function QuoteCell({
     toneClass = 'price-up';
   } else if (tone === 'down') {
     toneClass = 'price-down';
-  } else if (compare !== null && compare !== undefined && previousClose !== undefined) {
-    toneClass = compare > previousClose ? 'price-up' : compare < previousClose ? 'price-down' : '';
+  } else if (compare !== null && compare !== undefined && referencePrice !== null && referencePrice !== undefined) {
+    toneClass = compare > referencePrice ? 'price-up' : compare < referencePrice ? 'price-down' : '';
   }
   return (
     <div className="focus-quote-cell">

@@ -56,8 +56,8 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
       );
 
       const price = parseFiniteNumber(entry.z);
-      const previousClose = parseFiniteNumber(entry.y);
-      if (price === null || previousClose === null || previousClose <= 0) {
+      const referencePrice = parseFiniteNumber(entry.y);
+      if (price === null || referencePrice === null || referencePrice <= 0) {
         return yield* new TwseMisDecodeError({ stage: 'value' });
       }
 
@@ -68,9 +68,10 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
         name: entry.n,
         market: entry.ex === 'tse' ? 'TWSE' : 'TPEX',
         price,
-        previousClose,
-        change: round2(price - previousClose),
-        changePercent: round2(((price - previousClose) / previousClose) * 100),
+        referencePrice,
+        referencePriceType: 'previous_close' as const,
+        change: round2(price - referencePrice),
+        changePercent: round2(((price - referencePrice) / referencePrice) * 100),
         tradeDate: parseMisTradeDate(entry.d),
         openPrice: entry.o === undefined ? null : parseFiniteNumber(entry.o),
         highPrice: entry.h === undefined ? null : parseFiniteNumber(entry.h),

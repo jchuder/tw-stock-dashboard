@@ -35,7 +35,8 @@ const EXPECTED_QUOTE = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
   tradeDate: '2023-05-29',
@@ -182,7 +183,8 @@ describe('FugleQuoteProvider typed failures', () => {
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
-      expect(result.right.quote.previousClose).toBe(566);
+      expect(result.right.quote.referencePrice).toBe(566);
+      expect(result.right.quote.referencePriceType).toBe('previous_close');
     }
   });
 

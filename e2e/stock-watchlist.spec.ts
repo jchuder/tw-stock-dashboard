@@ -16,7 +16,8 @@ const QUOTE_2330 = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
   ...ENRICHED_QUOTE,
@@ -35,7 +36,8 @@ const QUOTE_2454 = {
   name: '聯發科',
   market: 'TWSE',
   price: 1200,
-  previousClose: 1180,
+  referencePrice: 1180,
+  referencePriceType: 'previous_close',
   change: 20,
   changePercent: 1.69,
   ...ENRICHED_QUOTE,
@@ -57,6 +59,7 @@ function makeCandles(symbol: string, range = '1d') {
     range,
     timeframe: intraday ? '5m' : '1d',
     volumeUnit: intraday ? 'lot' : 'share',
+    priceBasis: 'close',
     source: {
       provider: 'fugle',
       mode: intraday ? 'intraday' : 'eod',
@@ -64,12 +67,12 @@ function makeCandles(symbol: string, range = '1d') {
     },
     candles: intraday
       ? [
-          { date: '2026-09-04T09:00:00.000+08:00', open: 551, high: 561, low: 541, close: 555, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
-          { date: '2026-09-04T09:05:00.000+08:00', open: 555, high: 566, low: 545, close: 560, volume: 900, ma5: 555, ma10: null, ma20: null, ma60: null },
+          { date: '2026-09-04T09:00:00.000+08:00', open: 551, high: 561, low: 541, close: 555, average: null, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
+          { date: '2026-09-04T09:05:00.000+08:00', open: 555, high: 566, low: 545, close: 560, average: null, volume: 900, ma5: 555, ma10: null, ma20: null, ma60: null },
         ]
       : [
-          { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, volume: 1000, ma5: null, ma10: null, ma20: null, ma60: null },
-          { date: '2026-08-06', open: 555, high: 566, low: 545, close: 560, volume: 2000, ma5: 555, ma10: null, ma20: null, ma60: null },
+          { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, average: null, volume: 1000, ma5: null, ma10: null, ma20: null, ma60: null },
+          { date: '2026-08-06', open: 555, high: 566, low: 545, close: 560, average: null, volume: 2000, ma5: 555, ma10: null, ma20: null, ma60: null },
         ],
   };
 }

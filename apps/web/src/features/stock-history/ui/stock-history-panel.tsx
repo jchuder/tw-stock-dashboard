@@ -170,8 +170,8 @@ export function StockHistoryFocus({
   );
 }
 
-function getPriceClass(value: number, prevClose: number | null): string | undefined {
-  if (prevClose === null) return undefined;
+function getPriceClass(value: number | null, prevClose: number | null): string | undefined {
+  if (value === null || prevClose === null) return undefined;
   if (value > prevClose) return 'price-up';
   if (value < prevClose) return 'price-down';
   return undefined;
@@ -221,10 +221,10 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
             {displayRows.map((candle) => (
               <tr key={candle.date}>
                 <td>{candle.date}</td>
-                <td className={getPriceClass(candle.open, candle.prevClose)}>{candle.open.toLocaleString()}</td>
-                <td className={getPriceClass(candle.close, candle.prevClose)}>{candle.close.toLocaleString()}</td>
-                <td className={getPriceClass(candle.high, candle.prevClose)}>{candle.high.toLocaleString()}</td>
-                <td className={getPriceClass(candle.low, candle.prevClose)}>{candle.low.toLocaleString()}</td>
+                <td className={getPriceClass(candle.open, candle.prevClose)}>{candle.open === null ? '—' : candle.open.toLocaleString()}</td>
+                <td className={getPriceClass(candle.close, candle.prevClose)}>{candle.close === null ? '—' : candle.close.toLocaleString()}</td>
+                <td className={getPriceClass(candle.high, candle.prevClose)}>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
+                <td className={getPriceClass(candle.low, candle.prevClose)}>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
                 <td>{candle.volume.toLocaleString()}</td>
               </tr>
             ))}

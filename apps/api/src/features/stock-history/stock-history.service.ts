@@ -74,13 +74,17 @@ export class StockHistoryService {
       );
       const merged = mergeCandles([historical.candles, intraday.candles]);
       const withMa = applyMovingAverages(merged);
-      const cropped = cropToLastTradingDays(withMa, INTRADAY_TRADING_DAYS[range]);
+      const cropped = cropToLastTradingDays(withMa, INTRADAY_TRADING_DAYS[range]).map((candle) => ({
+        ...candle,
+        average: null,
+      }));
       return {
         symbol: historical.symbol,
         market: historical.market,
         range,
         timeframe: '5m' as const,
         volumeUnit: 'lot' as const,
+        priceBasis: 'close' as const,
         candles: cropped,
         source: {
           provider: 'fugle' as const,
@@ -110,7 +114,9 @@ export class StockHistoryService {
           );
           const merged: BaseCandle[] = mergeCandles(results.map((result) => result.candles));
           const withMa = applyMovingAverages(merged);
-          const visibleCandles = withMa.filter((candle) => candle.date >= visible.from);
+          const visibleCandles = withMa
+            .filter((candle) => candle.date >= visible.from)
+            .map((candle) => ({ ...candle, average: null }));
           const first = results[0];
           return {
             symbol: first.symbol,
@@ -118,6 +124,7 @@ export class StockHistoryService {
             range,
             timeframe: '1d' as const,
             volumeUnit: 'share' as const,
+            priceBasis: 'close' as const,
             candles: visibleCandles,
             source: {
               provider: 'fugle' as const,
@@ -155,13 +162,16 @@ export class StockHistoryService {
         visibleTo,
       );
       const withMa = applyMovingAverages(official.candles);
-      const visibleCandles = withMa.filter((c) => c.date >= visibleFrom);
+      const visibleCandles = withMa
+        .filter((c) => c.date >= visibleFrom)
+        .map((candle) => ({ ...candle, average: null }));
       return {
         symbol: official.symbol,
         market: official.market,
         range,
         timeframe: '1d' as const,
         volumeUnit: 'share' as const,
+        priceBasis: 'close' as const,
         candles: visibleCandles,
         source: {
           provider: official.provider,

@@ -169,8 +169,15 @@ export function StockHistoryChart({
     if (!chart || !candleSeries || !volumeSeries || !ma5Series || !ma10Series || !ma20Series || !ma60Series) {
       return;
     }
+    // Candlestick/volume need full OHLC numbers. TWSE/TPEX rows always have
+    // them; average-basis (ESB) rows arrive with nulls and are skipped here
+    // until the Phase 3 line series lands — never coerced to 0.
+    const ohlc = candles.filter(
+      (c): c is Candle & { open: number; high: number; low: number; close: number } =>
+        c.open !== null && c.high !== null && c.low !== null && c.close !== null,
+    );
     candleSeries.setData(
-      candles.map((candle) => ({
+      ohlc.map((candle) => ({
         time: toChartTime(candle.date, timeframe),
         open: candle.open,
         high: candle.high,
@@ -179,7 +186,7 @@ export function StockHistoryChart({
       })),
     );
     volumeSeries.setData(
-      candles.map((candle) => ({
+      ohlc.map((candle) => ({
         time: toChartTime(candle.date, timeframe),
         value: candle.volume,
         color: candle.close >= candle.open ? UP_VOLUME_COLOR : DOWN_VOLUME_COLOR,

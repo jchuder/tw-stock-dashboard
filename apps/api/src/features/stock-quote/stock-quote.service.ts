@@ -181,7 +181,7 @@ function fallbackReason(error: FugleQuoteError): FallbackReason {
   }
 }
 
-function servedSpanAttributes(provider: 'fugle' | 'twse-mis', fallbackUsed: boolean, cacheHit: boolean) {
+function servedSpanAttributes(provider: 'fugle' | 'twse-mis' | 'tpex-esb', fallbackUsed: boolean, cacheHit: boolean) {
   return {
     'market_data.provider': provider,
     'market_data.fallback_used': fallbackUsed,

@@ -54,8 +54,8 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
       );
 
       const price = fugle.lastPrice ?? fugle.closePrice ?? null;
-      const previousClose = fugle.previousClose ?? ticker.previousClose ?? ticker.referencePrice ?? null;
-      if (price === null || previousClose === null) {
+      const referencePrice = fugle.previousClose ?? ticker.previousClose ?? ticker.referencePrice ?? null;
+      if (price === null || referencePrice === null) {
         return yield* new FugleDecodeError({ stage: 'schema' });
       }
 
@@ -64,7 +64,8 @@ export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
         name: fugle.name,
         market: fugle.exchange === 'TWSE' ? 'TWSE' : 'TPEX',
         price,
-        previousClose,
+        referencePrice,
+        referencePriceType: 'previous_close' as const,
         change: fugle.change,
         changePercent: fugle.changePercent,
         tradeDate: fugle.date ?? ticker.date ?? null,

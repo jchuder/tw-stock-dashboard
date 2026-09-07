@@ -1,7 +1,15 @@
-import type { Candle } from '@tw-stock-dashboard/contracts';
-
-export type BaseCandle = Pick<Candle, 'date' | 'open' | 'high' | 'low' | 'close' | 'volume'>;
-
+// Provider-internal candle: upstream TWSE/TPEX/Fugle daily rows always carry
+// full OHLC numbers (rows that fail parsing are skipped before this point).
+// ESB average-basis candles arrive in Phase 3 with their own assembly; the
+// contract Candle stays nullable at the boundary.
+export interface BaseCandle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
 export type CandleWithMa = BaseCandle & {
   ma5: number | null;
   ma10: number | null;
