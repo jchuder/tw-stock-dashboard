@@ -214,7 +214,7 @@ export function StockHistoryFocus({
                     isDisabled
                       ? intradayDisabledReason === 'esb-official-daily'
                         ? '興櫃目前提供官方日均價資料'
-                        : '5 分 K 需配置 Fugle API Key'
+                        : '5 分 K 需設定 Fugle API Key'
                       : undefined
                   }
                   onClick={() => onRangeChange(option.value)}

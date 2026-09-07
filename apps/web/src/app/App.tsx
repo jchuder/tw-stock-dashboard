@@ -15,7 +15,7 @@ export interface QuoteProvenance {
 }
 
 const PROVIDER_LABELS = {
-  fugle: 'Fugle API Connected',
+  fugle: 'Fugle API',
   'twse-mis': 'TWSE MIS',
   'tpex-esb': 'TPEX ESB',
 } as const;

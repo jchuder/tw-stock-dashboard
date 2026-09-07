@@ -54,6 +54,12 @@ const MIS_BODY = {
 const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('tw-stock-dashboard.watchlist.v2', JSON.stringify(['2330']));
+  });
+});
+
 test('stock quote happy path', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
@@ -75,7 +81,7 @@ test('stock quote happy path', async ({ page }) => {
   await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 2 (+0.35%)');
   await expect(page.getByRole('group', { name: '目前股價 568，較前一交易日上漲 2，漲跌幅 0.35%' })).toBeVisible();
   await expect(page.getByText('前一交易日收盤 566')).toBeVisible();
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
   await expect(page.getByText('最後更新：2026/09/04 13:30:00')).toBeVisible();
   // Enriched session grid
   await expect(page.getByTestId('focus-quote-grid')).toContainText('開盤價');
@@ -140,7 +146,7 @@ test('source fallback and recovery toasts', async ({ page }) => {
   await page.goto('/');
 
   // Response 1: live Fugle (boot autofocus query) — badge, no toast.
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
   await expect(page.getByText(FALLBACK_TOAST)).toHaveCount(0);
 
   await page.getByPlaceholder('請輸入股票代號').fill('2330');
@@ -160,7 +166,7 @@ test('source fallback and recovery toasts', async ({ page }) => {
   // Response 4: live Fugle again — recovery toast, badge back.
   await search.click();
   await expect(page.getByText(RECOVERY_TOAST)).toHaveCount(1);
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
 });
 
 test('same-symbol refresh clears header provenance until new quote resolves', async ({ page }) => {
@@ -200,7 +206,7 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
   await page.goto('/');
 
   // Response 1 (boot autofocus query): header displays initial source and update time
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
   await expect(page.getByText('最後更新：2026/09/04 13:30:00')).toBeVisible();
 
   // Trigger same-symbol refresh
@@ -294,7 +300,7 @@ test('public data mode shows persistent banner, disables 5m candles, and updates
   await expect(dayBtn).toBeDisabled();
   await expect(threeDayBtn).toBeDisabled();
   await expect(fiveDayBtn).toBeDisabled();
-  await expect(dayBtn).toHaveAttribute('title', '5 分 K 需配置 Fugle API Key');
+  await expect(dayBtn).toHaveAttribute('title', '5 分 K 需設定 Fugle API Key');
 
   // 5. 1M range button is active by default in public data mode
   const oneMonthBtn = page.getByRole('button', { name: '1M' });
