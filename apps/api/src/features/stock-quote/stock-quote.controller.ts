@@ -7,6 +7,7 @@ import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { addSpanEvent } from '../../libs/observability/tracing.js';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
+import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 
 // Single Effect runtime boundary for this slice. Expected failures translate
 // to the frozen generic 500 after logging safe fields; unexpected defects are

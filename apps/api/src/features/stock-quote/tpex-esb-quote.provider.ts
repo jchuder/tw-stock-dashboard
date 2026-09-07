@@ -8,7 +8,7 @@ import {
   TpexEsbNetworkError,
   TpexEsbTimeoutError,
 } from './tpex-esb-quote.error.js';
-import type { QuoteProviderResult } from './quote-provider.js';
+import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
 import { TpexEsbSnapshotSchema } from './tpex-esb-quote.schema.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 

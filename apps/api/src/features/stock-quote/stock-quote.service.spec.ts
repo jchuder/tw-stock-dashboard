@@ -13,6 +13,7 @@ import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
 
@@ -47,7 +48,7 @@ const EXPECTED_QUOTE = {
 
 type QuoteResult = Either.Either<
   StockQuoteResponse,
-  FugleQuoteError | TwseMisQuoteError | StockNotFoundError | UniverseUnavailableError
+  FugleQuoteError | TwseMisQuoteError | TpexEsbQuoteError | StockNotFoundError | UniverseUnavailableError
 >;
 
 interface ExpectedSource {
