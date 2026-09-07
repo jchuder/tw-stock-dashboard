@@ -71,6 +71,27 @@ export function getHistoryTableHeaders(priceBasis: PriceBasis): readonly string[
     ? ['日期', '最高價', '最低價', '平均價', '成交量（股）']
     : ['日期', '開盤價', '收盤價', '最高價', '最低價', '成交量（股）'];
 }
+export function getHistoryDisplayLabels(
+  priceBasis: PriceBasis,
+  timeframe: StockHistoryResponse['timeframe'],
+): {
+  timeframeLabel: string;
+  movingAverageLabel: string;
+  periodsAriaLabel: string;
+} {
+  return priceBasis === 'average'
+    ? {
+        timeframeLabel: '每日',
+        movingAverageLabel: 'MA 依日均價計算',
+        periodsAriaLabel: '歷史期間',
+      }
+    : {
+        timeframeLabel: TIMEFRAME_LABELS[timeframe],
+        movingAverageLabel: 'MA 依目前 K 線週期計算',
+        periodsAriaLabel: 'K 線期間',
+      };
+}
+
 
 // Focus-card section: MA legend, chart, then periods below the chart. Plain
 // divs — the card wrapper lives in the StockAnalysis composition so quote,
@@ -91,6 +112,10 @@ export function StockHistoryFocus({
     queryFn: () => fetchStockHistory(symbol, range),
     retry: false,
   });
+  const displayLabels = history.data
+    ? getHistoryDisplayLabels(history.data.priceBasis, history.data.timeframe)
+    : null;
+
 
   return (
     <section aria-label="股價走勢" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -123,7 +148,7 @@ export function StockHistoryFocus({
         <span className="chart-toggle-hint">點按左側圖例可切換顯示</span>
       </div>
       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0' }}>
-        MA 依目前 K 線週期計算
+        {displayLabels?.movingAverageLabel ?? 'MA 依目前 K 線週期計算'}
       </p>
 
       {history.isPending && <p style={{ color: 'var(--text-muted)' }}>歷史資料載入中…</p>}
@@ -146,7 +171,7 @@ export function StockHistoryFocus({
             }}
           >
             <span>
-              {TIMEFRAME_LABELS[history.data.timeframe]} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
+              {displayLabels?.timeframeLabel ?? '日 K'} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
             </span>
             {history.data.source && (
               <span
@@ -169,7 +194,11 @@ export function StockHistoryFocus({
             priceBasis={history.data.priceBasis}
             maVisibility={maVisibility}
           />
-          <div className="periods" role="group" aria-label="K 線期間">
+          <div
+            className="periods"
+            role="group"
+            aria-label={displayLabels?.periodsAriaLabel ?? 'K 線期間'}
+          >
             {HISTORY_RANGES.map((option) => {
               const isIntraday = isIntradayRange(option.value);
               const isDisabled = disableIntradayRanges && isIntraday;
