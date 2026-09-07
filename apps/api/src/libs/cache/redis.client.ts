@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { createClient } from 'redis';
-import type { RedisClientType } from 'redis';
+import type { RedisClientOptions, RedisClientType } from 'redis';
 
 // Fail-open Redis access. No REDIS_URL means the cache is intentionally
 // disabled (INFO once); a configured-but-unreachable Redis degrades to
@@ -40,10 +40,25 @@ export function getRedisClient(): RedisClientType | null {
     return null;
   }
   if (!client) {
-    client = createClient({ url });
+    client = createClient(buildClientOptions(url));
     client.on('error', (err: unknown) => {
       warnThrottled(`Redis client error, bypassing cache: ${err instanceof Error ? err.message : String(err)}`);
     });
   }
   return client;
+}
+
+// Fail-fast client shape, exported pure for unit tests: while disconnected,
+// commands must reject immediately instead of queueing behind a reconnect
+// that would hold user requests hostage. Reconnect happens on the next
+// cache access via ensureConnected, bounded by connectTimeout each time.
+export function buildClientOptions(url: string): RedisClientOptions {
+  return {
+    url,
+    disableOfflineQueue: true,
+    socket: {
+      connectTimeout: 1000,
+      reconnectStrategy: false,
+    },
+  };
 }

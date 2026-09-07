@@ -73,4 +73,18 @@ export class CacheService {
       }
     });
   }
+  del(key: string): Effect.Effect<void, never> {
+    return Effect.promise(async () => {
+      try {
+        if (!(await ensureConnected())) {
+          return;
+        }
+        await getRedisClient()?.del(key);
+      } catch (err) {
+        reportRedisFailure(
+          `Redis DEL failed for key ${key}, bypassing cache: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+  }
 }

@@ -40,14 +40,28 @@ function pushRow(
 ): void {
   // First source wins: TWSE stock/ETF, then TPEX stock, then ESB, then TPEX
   // ETF. No dual listing is expected; a repeat logs so drift stays visible.
-  if (!symbol || seen.has(symbol)) {
-    if (symbol && seen.has(symbol)) {
-      log.warn(`Duplicate universe symbol ${symbol}; keeping first source`);
-    }
+  // Empty symbols or names are skipped: an upstream schema drift that blanks
+  // a required field must degrade the row, never poison the universe.
+  if (!symbol || !name) {
+    return;
+  }
+  if (seen.has(symbol)) {
+    log.warn(`Duplicate universe symbol ${symbol}; keeping first source`);
     return;
   }
   seen.add(symbol);
   target.push({ symbol, name, market, type });
+}
+
+// Integrity floor: an HTTP 200 with zero usable rows (empty payload or a
+// silent upstream schema drift blanking every required field) is a provider
+// failure, never a complete build. Without this, one bad source would mint
+// false 404s into the 24h canonical cache.
+function requireNonEmpty(out: Security[], source: string): Security[] {
+  if (out.length === 0) {
+    throw new UniverseSourceError({ source });
+  }
+  return out;
 }
 
 function parseJsonRows(raw: unknown, source: string): Array<Record<string, unknown>> {
@@ -157,7 +171,7 @@ export class UniverseProvider {
       for (const row of rows) {
         pushRow(out, seen, clean(row['公司代號']), clean(row['公司簡稱']), 'TWSE', 'stock');
       }
-      return out;
+      return requireNonEmpty(out, 'twse-listed');
     });
   }
 
@@ -169,7 +183,7 @@ export class UniverseProvider {
       for (const row of rows) {
         pushRow(out, seen, clean(row['基金代號']), clean(row['基金簡稱']), 'TWSE', 'etf');
       }
-      return out;
+      return requireNonEmpty(out, 'twse-fund');
     });
   }
 
@@ -181,7 +195,7 @@ export class UniverseProvider {
       for (const row of rows) {
         pushRow(out, seen, clean(row['SecuritiesCompanyCode']), clean(row['CompanyAbbreviation']), 'TPEX', 'stock');
       }
-      return out;
+      return requireNonEmpty(out, 'tpex-otc');
     });
   }
 
@@ -193,7 +207,7 @@ export class UniverseProvider {
       for (const row of rows) {
         pushRow(out, seen, clean(row['SecuritiesCompanyCode']), clean(row['CompanyAbbreviation']), 'ESB', 'stock');
       }
-      return out;
+      return requireNonEmpty(out, 'tpex-esb');
     });
   }
 

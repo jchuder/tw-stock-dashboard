@@ -9,4 +9,5 @@ export const UNIVERSE_CACHE_TOKEN = 'universe-cache';
 export interface UniverseCache {
   getJson(key: string): Effect.Effect<unknown | null, never>;
   setJson(key: string, value: unknown, ttlSeconds: number): Effect.Effect<void, never>;
+  del(key: string): Effect.Effect<void, never>;
 }

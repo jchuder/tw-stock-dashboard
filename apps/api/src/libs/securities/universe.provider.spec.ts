@@ -90,6 +90,27 @@ describe('UniverseProvider', () => {
     expect(build.securities.map((s) => s.symbol)).toEqual(['2330', '2317', '00981A', '6488', '7883']);
   });
 
+  it('fails a source returning HTTP 200 with an empty array', async () => {
+    stubUniverse({ [TWSE_LISTED_URL]: new Response('[]', { status: 200 }) });
+
+    const build = await runBuild();
+
+    expect(build.complete).toBe(false);
+    expect(build.failures).toEqual(['twse-listed']);
+    expect(build.securities.map((s) => s.symbol)).not.toContain('2330');
+  });
+
+  it('fails a source whose required fields silently renamed', async () => {
+    stubUniverse({
+      [TWSE_LISTED_URL]: new Response(JSON.stringify([{ 代號: '2330', 簡稱: '台積電' }]), { status: 200 }),
+    });
+
+    const build = await runBuild();
+
+    expect(build.complete).toBe(false);
+    expect(build.failures).toEqual(['twse-listed']);
+  });
+
   it('treats a missing ISIN ETF section as a provider failure, not an empty universe', async () => {
     stubUniverse({ [TPEX_ISIN_ETF_URL]: new Response('<html>no sections here</html>', { status: 200 }) });
 

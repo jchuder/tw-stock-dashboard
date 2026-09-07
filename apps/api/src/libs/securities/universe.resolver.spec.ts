@@ -13,14 +13,23 @@ const FULL: Security[] = [
   { symbol: '00981A', name: '主動統一台股增長', market: 'TWSE', type: 'etf' },
 ];
 
-function fakeCache(store: Record<string, unknown> = {}): UniverseCache & { writes: Array<{ key: string; ttl: number }> } {
+function fakeCache(
+  store: Record<string, unknown> = {},
+): UniverseCache & { writes: Array<{ key: string; ttl: number }>; deletes: string[] } {
   const writes: Array<{ key: string; ttl: number }> = [];
+  const deletes: string[] = [];
   return {
     writes,
+    deletes,
     getJson: (key: string) => Effect.succeed(Object.hasOwn(store, key) ? (store[key] as unknown) : null),
     setJson: (key: string, value: unknown, ttlSeconds: number) => {
       writes.push({ key, ttl: ttlSeconds });
       store[key] = value;
+      return Effect.void;
+    },
+    del: (key: string) => {
+      deletes.push(key);
+      delete store[key];
       return Effect.void;
     },
   };
@@ -86,6 +95,37 @@ describe('UniverseResolver', () => {
 
     expect(await resolveOf(resolver, '7883')).toEqual(Either.right(FULL[1]));
     expect(await resolveOf(resolver, '999999')).toEqual(Either.left(new StockNotFoundError()));
+  });
+
+  it('prefers fresh partial rows over last-known-good', async () => {
+    const NEW1 = { symbol: 'NEW1', name: '新掛牌', market: 'TWSE', type: 'stock' } as const;
+    const cache = fakeCache({ 'security-universe:lkg:v1': [FULL[0]] });
+    const resolver = new UniverseResolver(
+      cache,
+      fakeProvider({ securities: [FULL[0], NEW1], complete: false, failures: ['tpex-isin-etf'] }),
+    );
+
+    expect(await resolveOf(resolver, 'NEW1')).toEqual(Either.right(NEW1));
+    expect(await resolveOf(resolver, '2330')).toEqual(Either.right(FULL[0]));
+  });
+
+  it('deletes schema-invalid canonical entries instead of rebuilding forever', async () => {
+    const cache = fakeCache({ 'security-universe:v1': { old: 'shape' } });
+    const resolver = new UniverseResolver(cache, fakeProvider({ securities: FULL, complete: true, failures: [] }));
+
+    expect(await resolveOf(resolver, '2330')).toEqual(Either.right(FULL[0]));
+    expect(cache.deletes).toEqual(['security-universe:v1']);
+  });
+
+  it('deletes schema-invalid last-known-good entries', async () => {
+    const cache = fakeCache({ 'security-universe:lkg:v1': { old: 'shape' } });
+    const resolver = new UniverseResolver(
+      cache,
+      fakeProvider({ securities: [FULL[0]], complete: false, failures: ['tpex-isin-etf'] }),
+    );
+
+    expect(await resolveOf(resolver, '2330')).toEqual(Either.right(FULL[0]));
+    expect(cache.deletes).toEqual(['security-universe:lkg:v1']);
   });
 
   it('caches only complete builds as canonical and last-known-good', async () => {

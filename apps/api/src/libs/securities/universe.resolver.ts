@@ -88,7 +88,10 @@ export class UniverseResolver {
       return { bySymbol: indexBySymbol(decoded.right), complete: true, degraded: false };
     }
     if (cached !== null) {
-      log.warn('Cached universe failed schema decode; rebuilding from upstream');
+      // Stale schema, not stale data: evict so the next request does not pay
+      // another full upstream rebuild for the same poisoned entry.
+      log.warn('Cached universe failed schema decode; deleting entry and rebuilding from upstream');
+      await Effect.runPromise(this.cache.del(UNIVERSE_CACHE_KEY));
     }
     const build = await Effect.runPromise(this.provider.build());
     if (build.complete) {
@@ -102,12 +105,18 @@ export class UniverseResolver {
     const lkg = await Effect.runPromise(this.cache.getJson(UNIVERSE_LKG_CACHE_KEY));
     const lkgDecoded = lkg === null ? null : Schema.decodeUnknownEither(Schema.Array(SecuritySchema))(lkg);
     if (lkgDecoded !== null && lkgDecoded._tag === 'Right') {
-      log.warn(`Universe rebuild partial (${build.failures.join(',')}); serving last-known-good`);
+      // Merge with fresh partial winning: LKG must not shadow symbols that a
+      // successful source already returned (e.g. a listing that postdates it).
+      log.warn(`Universe rebuild partial (${build.failures.join(',')}); serving merged last-known-good`);
       return {
-        bySymbol: indexBySymbol(lkgDecoded.right),
+        bySymbol: { ...indexBySymbol(lkgDecoded.right), ...indexBySymbol(build.securities) },
         complete: true,
         degraded: true,
       };
+    }
+    if (lkg !== null) {
+      log.warn('Last-known-good universe failed schema decode; deleting entry');
+      await Effect.runPromise(this.cache.del(UNIVERSE_LKG_CACHE_KEY));
     }
     log.warn(`Universe rebuild partial (${build.failures.join(',')}) with no last-known-good`);
     const bySymbol = indexBySymbol(build.securities);
