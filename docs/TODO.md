@@ -12,6 +12,12 @@ implement them opportunistically — each needs its own design and review.
 
 ### Market Overview
 
+* TAIEX / OTC 盤中即時化
+  * 盤中 realtime snapshot，盤後 EOD
+  * 研究 Fugle index provider / fallback
+  * frontend polling strategy
+  * market-session / stale-data semantics
+* 三大法人維持盤後正式統計，不做盤中即時化
 * TAIEX / OTC market trading volume
   * confirm official source and unit semantics before extending contract
 * TAIEX / OTC sparkline

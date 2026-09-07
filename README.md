@@ -6,11 +6,11 @@ A production-minded Taiwan stock dashboard demo built with NestJS, Effect and Re
 
 ## 功能特色
 
-1. 市場概況（Market Overview）：呈現最近交易日加權指數（TAIEX）與櫃買指數（OTC）收盤資訊，以及上市三大法人（外資、投信、自營商）合計買賣超金額。
-2. 個股報價（Stock Quote）：以明確文字呈現相較前一交易日的漲跌（上漲紅/下跌綠/持平），含昨收價、上市櫃 badge、交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）、資料來源與報價時間戳記，配置 5 秒 in-memory TTL 快取。
-3. 技術線圖與均線（Stock History & Indicators）：支援當日/3D/5D（5 分鐘 K）與 1M/3M/6M/1Y（日 K），預設當日；MA5/MA10/MA20/MA60 以可點選圖例切換（預設僅 MA5 顯示，MA 依目前 K 線週期計算）與成交量直方圖（5 分 K 以張、日 K 以股計）。
-4. 本機自選股（Local-First Watchlist）：免登入即可將關注個股加入自選清單，資料持久化於瀏覽器 LocalStorage，支援一鍵點擊切換分析與移除。
-5. 狀態監控與響應設計（Health & Responsive UI）：頂部顯示 API 即時連線狀態燈號，中央為全域股票搜尋；版面採左側焦點分析欄（報價/線圖/近期交易資料）加右側自選股欄，行動裝置依序堆疊。
+1. 市場概況（Market Overview）：呈現最近交易日加權指數（TAIEX）與櫃買指數（OTC）收盤資訊，以及上市三大法人（外資、投信、自營商）合計買賣超金額。點位與漲跌幅依金融慣例標示顏色（上漲紅/下跌綠/持平），並明確標示目前為日終盤後（EOD）數據。
+2. 個股報價（Stock Quote）：呈現焦點個股資訊（例如 `2330 台積電 [上市] [★ 已在觀察]`），以明確文字呈現相較前一交易日的漲跌（現價與漲跌幅同步以紅/綠/持平著色），標註前一交易日收盤價與交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）；頂部 Header 即時顯示資料來源（Fugle API Connected 或 TWSE MIS 備援切換）與最後報價時間戳記，配置 5 秒 in-memory TTL 快取與異常降級備援提示。
+3. 技術線圖與均線（Stock History & Indicators）：支援當日/3D/5D（5 分鐘 K）與 1M/3M/6M/1Y（日 K），預設當日；MA5/MA10/MA20/MA60 以可點選虛線圖例切換（預設僅 MA5 顯示，右軸標示最新均線數值標籤），十字游標採用台北時間呈現，成交量直方圖單位自動對應（5 分 K 以張、日 K 以股計）；附帶最近 5 個交易日歷史交易明細表格，OHLC 欄位相對前一交易日收盤價以紅綠標示。
+4. 本機自選股（Local-First Watchlist）：免登入即可將關注個股加入自選清單，資料持久化於瀏覽器 LocalStorage；首次啟動預設 seed 台積電（2330）並自動聚焦，使用者主動清空自選清單後不會再次強制 re-seed，支援一鍵點擊切換分析焦點與移除。
+5. 頂部導航與響應設計（Header & Responsive UI）：頂部 Header 提供全域股票代號搜尋輸入框、目前焦點個股資料來源 badge 與最後更新時間戳記；版面採左側焦點分析欄（市場概況/報價/線圖/近期交易明細）加右側自選股清單欄，行動裝置依序垂直堆疊。
 
 ## 系統架構拓撲
 
@@ -24,7 +24,7 @@ e2e/                Playwright 端到端驗證測試集
 docs/               說明文件與系統真實畫面截圖
 ```
 
-### 資料流與元件拓撲
+### 應用程式資料流拓撲（Application Architecture）
 
 ```mermaid
 flowchart TB
@@ -64,6 +64,42 @@ flowchart TB
     EffectEngine --> TPEx
     Server -- OTLP gRPC/HTTP --> SigNoz
 ```
+
+### 外部 Demo 分享拓撲（External Demo / Quick Tunnel Topology）
+
+當需要將本機運行的服務分享給外部訪客試用時，系統透過 Cloudflare Quick Tunnel 搭配 Vite 原生 Reverse Proxy 實現單一公開網址轉發：
+
+```mermaid
+flowchart TB
+    subgraph Internet["外部網際網路 (Internet)"]
+        Visitor["外部訪客瀏覽器"]
+        CF["Cloudflare Quick Tunnel (*.trycloudflare.com)"]
+    end
+
+    subgraph LocalMachine["開發者本機環境 (Local Machine)"]
+        subgraph ViteHost["Vite 前端伺服器 (Port 5173)"]
+            ViteApp["React 19 靜態前端資源 (/)"]
+            ViteProxy["Vite Reverse Proxy (/api, /health)"]
+        end
+
+        subgraph NestHost["NestJS 後端服務 (Port 3001)"]
+            API["NestJS API (OTel start:otel)"]
+        end
+
+        Upstream["外部市場資料源 (Fugle / TWSE / TPEx)"]
+        SigNoz["SigNoz OTel Collector"]
+    end
+
+    Visitor -- HTTPS 存取 --> CF
+    CF -- 本機通道轉發 --> ViteHost
+    ViteApp -- 傳送網頁資源 --> Visitor
+    Visitor -- 相對路徑 API 呼叫 (/api/v1/...) --> ViteProxy
+    ViteProxy -- 本地內部反向代理 --> NestHost
+    API --> Upstream
+    API -. OTLP 遙測數據 .-> SigNoz
+```
+
+> **安全與邊界說明**：Quick Tunnel 僅供短期 Demo 分享使用；第三方 API 金鑰（`FUGLE_API_KEY`）僅保留於後端本機，外部訪客瀏覽器透過同源相對路徑（`/api` 與 `/health`）由 Vite 內建反向代理安全轉送至 NestJS，避免外部請求直連訪客本機。
 
 ## 核心設計理念：為什麼選擇 NestJS 搭配 Effect
 
@@ -113,7 +149,7 @@ cd tw-stock-dashboard
 pnpm install
 ```
 
-### 開發伺服器啟動
+### 開發伺服器啟動（一般本機模式）
 
 API 服務支援 Node 24 原生 `--env-file-if-exists=.env.local` 載入機制。複製範本檔案建立本機環境變數配置，填入金鑰後啟動（亦可透過 shell export 設定，外部環境變數優先權高於 `.env.local`）：
 
@@ -131,6 +167,32 @@ pnpm dev:web
 
 可參考專案根目錄之 `.env.example` 了解各項環境變數用途。
 
+### 外部 Demo 分享啟動（Cloudflare Quick Tunnel 模式）
+
+若需產生單一臨時公開網址供外部人員試用，專案提供透過 `mise` 一鍵建置並平行啟動前後端與 Cloudflare 通道：
+
+#### 先決條件
+- [mise](https://mise.jdx.dev/)：管理執行環境與任務自動化（本機已配置）
+- [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/)：`brew install cloudflared`（僅外部分享時需要）
+
+#### 一鍵啟動指令
+```bash
+mise run demo
+```
+
+該工作流程會自動依序執行：
+1. `pnpm build`：完成全專案建置產物。
+2. 平行啟動三項服務：
+   - 後端 API：`pnpm --filter @tw-stock-dashboard/api start:otel`（監聽 Port 3001，保留完整 OpenTelemetry 遙測）
+   - 前端 Web：`pnpm dev:web:tunnel`（以 `VITE_API_URL=""` 監聽 Port 5173，啟用相對路徑與 tunnel allowlist）
+   - Cloudflare Quick Tunnel：`cloudflared tunnel --url http://localhost:5173`
+3. 終端機會在 `[demo:tunnel]` 區塊印出 `https://xxxx.trycloudflare.com` 臨時公開網址，直接提供給測試者即可。亦可於另一終端機執行 `curl -s http://127.0.0.1:20242/metrics | grep -o 'https://[^"]*\.trycloudflare\.com'` 快速查詢目前網址。
+
+#### 使用限制與安全性說明
+- **臨時網址**：Quick Tunnel 隨機生成，每次重新啟動皆會變更。
+- **短期用途**：該網址為公開 Internet 入口，僅供短期面試或同仁試用展示，不設有 SLA，且不宜長期公開張貼以保護 Fugle API 調用額度。
+- **非正式部署**：本功能非正式生產環境部署；正式線上部署建議使用具名通道（Named Tunnel）、自訂網域或配置 Cloudflare Access 身份驗證。
+
 ### 建置與品質驗證指令
 
 本專案設有全套自動化檢驗管道，提交前皆須通過所有關卡：
@@ -144,6 +206,8 @@ pnpm dev:web
 | `pnpm test:e2e` | 執行 Playwright 端到端驗證測試集 |
 | `pnpm smoke:dev-topology` | 執行前後端真實拓撲（5173 呼叫 3001）即時煙霧測試（選填，需配置 API Key） |
 | `pnpm verify:boundaries` | 驗證模組架構邊界防護規則 |
+| `pnpm dev:web:tunnel` | 啟動前端相對路徑 Tunnel 模式（供 Cloudflare 反向代理使用） |
+| `mise run demo` | 一鍵建置並平行啟動後端（含 OTel）、前端與 Cloudflare Tunnel |
 
 ## 可觀測性（Observability，選填）
 
@@ -166,6 +230,7 @@ pnpm --filter @tw-stock-dashboard/api start:otel
 
 1. 關聯追蹤（Correlation）：每個傳入的 HTTP 請求均由中介軟體自動分配唯一的 `request_id`，並與 OpenTelemetry `trace_id` 緊密關聯，輸出於每筆 JSON 日誌中。
 2. 機密脫敏（Redaction Policy）：日誌系統嚴格過濾機密資訊，`FUGLE_API_KEY`、授權標頭及連線憑證絕不輸出至終端機或傳送至遠端收集器。
+3. 外部 Demo 遙測覆蓋：執行 `mise run demo` 時，後端同樣透過 `start:otel` 啟動，外部訪客透過 Cloudflare Tunnel 觸發的所有 API 操作皆會完整輸出 OpenTelemetry Traces 與結構化日誌至 SigNoz。
 
 ## 架構決策與邊界防護（Architecture Invariants）
 
@@ -175,3 +240,4 @@ pnpm --filter @tw-stock-dashboard/api start:otel
 4. 本機優先（Local-First）：使用者自選股清單完全儲存於本機瀏覽器端，具備零伺服器延遲、即時更新與隱私安全特性。
 5. 記憶體快取策略（In-Memory Caching）：僅為個股即時報價配置 5 秒 in-memory TTL 快取，歷史 OHLCV 與市場概況不快取。
 6. 無資料庫與免登入（No DB / No Auth）：Demo 專注於即時行情工作流與前端視覺呈現，不增加非必要之資料庫與鑑權基礎建設負擔。
+7. Demo 通道防護邊界（Demo Tunnel Boundary）：Quick Tunnel 僅作為開發與展示之臨時入口；`FUGLE_API_KEY` 嚴格限制於後端處理，永不暴露至前端。Tunnel 僅單點暴露 Vite（Port 5173），所有 API 與健康檢查請求均透過同源反向代理轉發至本機 Nest API，且僅在 tunnel 模式下允許 `.trycloudflare.com` 存取。
