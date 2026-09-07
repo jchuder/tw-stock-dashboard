@@ -1,40 +1,83 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import type { JSX } from 'react';
+import type { StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { Toaster } from 'sonner';
 import { MarketOverviewPanel } from '../features/market-overview/index.js';
+import { GlobalStockSearch } from '../features/stock-quote/index.js';
+import { loadWatchlist } from '../features/stock-watchlist/index.js';
 import { StockAnalysis } from '../widgets/stock-analysis/index.js';
-import { fetchHealth } from '../shared/api/health.js';
+import { formatTaipeiDateTime } from '../shared/datetime/format-taipei.js';
 import './app.css';
 
+export interface QuoteProvenance {
+  provider: StockQuoteProvider;
+  asOf: string | null;
+  fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
+}
+
+const PROVIDER_LABELS: Record<StockQuoteProvider, string> = {
+  fugle: 'Fugle API',
+  'twse-mis': 'TWSE MIS',
+  'twse-openapi': 'TWSE OpenAPI',
+  'tpex-openapi': 'TPEx OpenAPI',
+  'tpex-esb': 'TPEX ESB',
+};
+
 export function App(): JSX.Element {
-  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, retry: false });
+  // Boot focus: the first default watchlist symbol is queried immediately so
+  // the dashboard never opens on an empty analysis.
+  // The search box stays empty — it is an input control, not a selection
+  // mirror, so the two are deliberately not synced.
+  const [search, setSearch] = useState<{ symbol: string; seq: number } | null>(() => {
+    const first = loadWatchlist()[0];
+    return first === undefined ? null : { symbol: first, seq: 0 };
+  });
+  const [provenance, setProvenance] = useState<QuoteProvenance | null>(null);
 
-  let statusClass = 'checking';
-  let statusText = 'API: Checking…';
-
-  if (health.isSuccess) {
-    statusClass = 'connected';
-    statusText = 'API Connected';
-  } else if (health.isError) {
-    statusClass = 'disconnected';
-    statusText = 'API Disconnected';
-  }
+  // Re-submitting the same symbol must still refresh: the seq busts the
+  // quote query key so TanStack refetches instead of serving cache.
+  // We clear provenance immediately so stale metadata is never shown for an
+  // in-flight or failed refresh.
+  const onSearch = (symbol: string): void => {
+    setProvenance(null);
+    setSearch((prev) => ({ symbol, seq: (prev?.seq ?? 0) + 1 }));
+  };
 
   return (
     <div className="dashboard-container">
       <header className="dashboard-header">
         <div className="header-title-group">
           <h1>Taiwan Stock Dashboard</h1>
-          <p className="header-subtitle">台股市場資訊與個股技術分析</p>
         </div>
-        <div className="api-status-badge" role="status" aria-label="API 連線狀態">
-          <span className={`status-dot ${statusClass}`} />
-          <span>{statusText}</span>
+        <GlobalStockSearch onSearch={onSearch} />
+        <div className="top-actions">
+          <div className="top-meta">
+            <div>
+              <strong>資料來源：</strong>
+              {provenance === null
+                ? '—'
+                : provenance.fallbackReason === 'config_missing'
+                  ? `${PROVIDER_LABELS[provenance.provider]}（公開資料模式）`
+                  : PROVIDER_LABELS[provenance.provider]}
+            </div>
+            <div>
+              最後更新：
+              {provenance?.asOf == null ? '—' : formatTaipeiDateTime(provenance.asOf)}
+            </div>
+          </div>
         </div>
       </header>
-      <main>
+      <main className="dashboard-main">
+        <div className="page-heading">
+          <h1>台股市場焦點</h1>
+        </div>
         <MarketOverviewPanel />
-        <StockAnalysis />
+        <StockAnalysis
+          requestedSymbol={search?.symbol ?? null}
+          searchSeq={search?.seq ?? 0}
+          onSymbolSubmitted={onSearch}
+          onProvenance={setProvenance}
+        />
       </main>
       <Toaster closeButton />
     </div>

@@ -2,16 +2,51 @@ import { expect, test } from '@playwright/test';
 
 const MOCK_MARKET_OVERVIEW = {
   taiex: {
-    asOf: '2026-09-04',
-    close: 46551.13,
+    value: 46551.13,
     change: 693.47,
     changePercent: 1.51,
+    state: 'closed',
+    tradeDate: '2026-09-04',
+    asOf: null,
+    source: 'twse',
   },
   otc: {
-    asOf: '2026-09-04',
-    close: 402.48,
+    value: 402.48,
     change: 7.23,
     changePercent: 1.83,
+    state: 'closed',
+    tradeDate: '2026-09-04',
+    asOf: null,
+    source: 'tpex',
+  },
+  institutional: {
+    asOf: '2026-09-04',
+    market: 'TWSE',
+    foreignNetAmount: 56212953803,
+    investmentTrustNetAmount: -910866463,
+    dealerNetAmount: 6370061244,
+    totalNetAmount: 61672148584,
+  },
+};
+
+const MOCK_INTRADAY_MARKET_OVERVIEW = {
+  taiex: {
+    value: 47326.27,
+    change: 775.14,
+    changePercent: 1.67,
+    state: 'intraday',
+    tradeDate: '2026-09-07',
+    asOf: '2026-09-07T10:30:00+08:00',
+    source: 'twse-mis',
+  },
+  otc: {
+    value: 409.33,
+    change: 6.85,
+    changePercent: 1.7,
+    state: 'intraday',
+    tradeDate: '2026-09-07',
+    asOf: '2026-09-07T10:30:00+08:00',
+    source: 'twse-mis',
   },
   institutional: {
     asOf: '2026-09-04',
@@ -28,14 +63,24 @@ const QUOTE_BODY = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
+  tradeDate: '2026-09-04',
+  openPrice: 560,
+  highPrice: 570,
+  lowPrice: 559,
+  tradeVolume: 12345678,
+  limitUpPrice: 622,
+  limitDownPrice: 510,
+  tradeVolumeUnit: 'lot',
   source: {
     provider: 'fugle',
     fallbackUsed: false,
-    fetchedAt: '2026-09-05T04:40:00.000Z',
-    asOf: null,
+    fallbackReason: null,
+    fetchedAt: '2026-09-06T03:45:06.000Z',
+    asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
   },
 };
@@ -54,30 +99,31 @@ test('homepage loads TAIEX, OTC, and 上市三大法人 with positive/negative f
 
   await page.goto('/');
 
+  await expect(page.getByRole('heading', { name: '台股市場焦點' })).toBeVisible();
+
   // TAIEX
-  const taiexCard = page.getByTestId('market-index-加權指數');
+  const taiexCard = page.getByTestId('market-index-加權指數 (TAIEX)');
   await expect(taiexCard).toBeVisible();
-  await expect(taiexCard).toContainText('加權指數');
+  await expect(taiexCard).toContainText('加權指數 (TAIEX)');
   await expect(taiexCard).toContainText('46,551.13');
-  await expect(taiexCard).toContainText('+693.47 (+1.51%)');
-  await expect(taiexCard).toContainText('2026-09-04 收盤');
+  await expect(taiexCard.locator('.big-number')).toHaveClass(/price-up/);
+  await expect(taiexCard).toContainText('▲ +693.47 (+1.51%)');
+  await expect(taiexCard).toContainText('2026/09/04 收盤');
 
   // OTC
-  const otcCard = page.getByTestId('market-index-櫃買指數');
+  const otcCard = page.getByTestId('market-index-櫃買指數 (OTC)');
   await expect(otcCard).toBeVisible();
-  await expect(otcCard).toContainText('櫃買指數');
+  await expect(otcCard).toContainText('櫃買指數 (OTC)');
   await expect(otcCard).toContainText('402.48');
-  await expect(otcCard).toContainText('+7.23 (+1.83%)');
-  await expect(otcCard).toContainText('2026-09-04 收盤');
+  await expect(otcCard.locator('.big-number')).toHaveClass(/price-up/);
+  await expect(otcCard).toContainText('▲ +7.23 (+1.83%)');
+  await expect(otcCard).toContainText('2026/09/04 收盤');
 
-  // 上市三大法人
+  // 三大法人最近一日買賣超
   const instCard = page.getByTestId('market-institutional');
   await expect(instCard).toBeVisible();
-  await expect(instCard).toContainText('上市三大法人');
+  await expect(instCard).toContainText('三大法人最近一日買賣超');
   await expect(instCard).toContainText('+562.1 億');
-  await expect(instCard).toContainText('-9.1 億');
-  await expect(instCard).toContainText('+63.7 億');
-  await expect(instCard).toContainText('+616.7 億');
 });
 
 test('market overview 500 error does NOT break stock search', async ({ page }) => {
@@ -105,9 +151,34 @@ test('market overview 500 error does NOT break stock search', async ({ page }) =
   await expect(page.getByText('市場概況載入失敗')).toBeVisible();
 
   // 搜尋功能正常工作
-  await page.getByPlaceholder('2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await page.getByPlaceholder('請輸入股票代號').fill('2330');
+  await page.getByRole('button', { name: '搜尋' }).click();
 
-  await expect(page.getByText('2330 台積電')).toBeVisible();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await expect(page.getByText('568')).toBeVisible();
 });
+
+test('market overview displays intraday time correctly when in intraday state', async ({
+  page,
+}) => {
+  await page.route('**/api/v1/market/overview', (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_INTRADAY_MARKET_OVERVIEW),
+    });
+  });
+
+  await page.goto('/');
+
+  const taiexCard = page.getByTestId('market-index-加權指數 (TAIEX)');
+  await expect(taiexCard).toBeVisible();
+  await expect(taiexCard).toContainText('47,326.27');
+  await expect(taiexCard).toContainText('即時行情 · 10:30:00');
+
+  const otcCard = page.getByTestId('market-index-櫃買指數 (OTC)');
+  await expect(otcCard).toBeVisible();
+  await expect(otcCard).toContainText('409.33');
+  await expect(otcCard).toContainText('即時行情 · 10:30:00');
+});
+

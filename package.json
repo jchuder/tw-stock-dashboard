@@ -15,6 +15,7 @@
     "verify:boundaries": "node scripts/verify-boundaries.mjs",
     "dev:api": "pnpm --filter @tw-stock-dashboard/api dev",
     "dev:web": "pnpm --filter @tw-stock-dashboard/web dev",
+    "dev:web:tunnel": "pnpm --filter @tw-stock-dashboard/web dev:tunnel",
     "smoke:dev-topology": "node scripts/smoke-dev-topology.mjs"
   },
   "devDependencies": {

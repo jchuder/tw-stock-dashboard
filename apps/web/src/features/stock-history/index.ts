@@ -1,1 +1,1 @@
-export { StockHistoryPanel } from './ui/stock-history-panel.js';
+export { StockHistoryFocus, StockHistoryTable } from './ui/stock-history-panel.js';

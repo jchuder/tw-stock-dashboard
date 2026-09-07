@@ -1,114 +1,311 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import type { JSX } from 'react';
-import type { HistoryRange } from '@tw-stock-dashboard/contracts';
+import type { Candle, HistoryRange, PriceBasis, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
 import { fetchStockHistory } from '../api/stock-history.api.js';
 import { StockHistoryChart } from './stock-history-chart.js';
 import type { MaVisibility } from './stock-history-chart.js';
 
-const RANGES: ReadonlyArray<{ value: HistoryRange; label: string }> = [
+const HISTORY_RANGES: ReadonlyArray<{ value: HistoryRange; label: string }> = [
+  { value: '1d', label: '當日' },
+  { value: '3d', label: '3D' },
+  { value: '5d', label: '5D' },
   { value: '1m', label: '1M' },
   { value: '3m', label: '3M' },
   { value: '6m', label: '6M' },
+  { value: '1y', label: '1Y' },
 ];
 
-const MA_KEYS: ReadonlyArray<keyof MaVisibility> = ['ma5', 'ma10', 'ma20', 'ma60'];
+const MA_KEYS: ReadonlyArray<{ key: keyof MaVisibility; label: string }> = [
+  { key: 'ma5', label: 'MA5' },
+  { key: 'ma10', label: 'MA10' },
+  { key: 'ma20', label: 'MA20' },
+  { key: 'ma60', label: 'MA60' },
+];
 
-export function StockHistoryPanel({ symbol }: { symbol: string }): JSX.Element {
-  const [range, setRange] = useState<HistoryRange>('1m');
-  const [maVisibility, setMaVisibility] = useState<MaVisibility>({
-    ma5: true,
-    ma10: true,
-    ma20: true,
-    ma60: true,
-  });
+const TIMEFRAME_LABELS = {
+  '5m': '5 分鐘 K',
+  '1d': '日 K',
+} as const;
 
+const VOLUME_UNIT_LABELS = {
+  lot: '成交量（張）',
+  share: '成交量（股）',
+} as const;
+
+function isIntradayRange(range: HistoryRange): boolean {
+  return range === '1d' || range === '3d' || range === '5d';
+}
+
+export interface HistoryControls {
+  range: HistoryRange;
+  onRangeChange: (range: HistoryRange) => void;
+  maVisibility: MaVisibility;
+  onToggleMa: (key: keyof MaVisibility) => void;
+  disableIntradayRanges?: boolean;
+  intradayDisabledReason?: 'fugle-api-key' | 'esb-official-daily' | null;
+}
+
+export function formatChartSourceText(source: StockHistoryResponse['source']): string {
+  const providerLabel =
+    source.provider === 'fugle'
+      ? 'Fugle'
+      : source.provider === 'twse'
+        ? 'TWSE'
+        : source.provider === 'tpex-esb'
+          ? 'TPEx 興櫃'
+          : 'TPEx';
+  const modeLabel =
+    source.mode === 'intraday'
+      ? '即時 5 分 K'
+      : source.provider === 'fugle'
+        ? '盤後日 K'
+        : source.provider === 'tpex-esb'
+          ? '官方日均價'
+          : '官方盤後日 K';
+  const asOfText = source.asOf ? ` · 更新至 ${source.asOf.replace(/-/g, '/')}` : '';
+  return `${providerLabel} · ${modeLabel}${asOfText}`;
+}
+
+export function getHistoryTableHeaders(priceBasis: PriceBasis): readonly string[] {
+  return priceBasis === 'average'
+    ? ['日期', '最高價', '最低價', '平均價', '成交量（股）']
+    : ['日期', '開盤價', '收盤價', '最高價', '最低價', '成交量（股）'];
+}
+export function getHistoryDisplayLabels(
+  priceBasis: PriceBasis,
+  timeframe: StockHistoryResponse['timeframe'],
+): {
+  timeframeLabel: string;
+  movingAverageLabel: string;
+  periodsAriaLabel: string;
+} {
+  return priceBasis === 'average'
+    ? {
+        timeframeLabel: '每日',
+        movingAverageLabel: 'MA 依日均價計算',
+        periodsAriaLabel: '歷史期間',
+      }
+    : {
+        timeframeLabel: TIMEFRAME_LABELS[timeframe],
+        movingAverageLabel: 'MA 依目前 K 線週期計算',
+        periodsAriaLabel: 'K 線期間',
+      };
+}
+
+
+// Focus-card section: MA legend, chart, then periods below the chart. Plain
+// divs — the card wrapper lives in the StockAnalysis composition so quote,
+// metrics, legend, chart, and periods share one focus card.
+export function StockHistoryFocus({
+  symbol,
+  range,
+  onRangeChange,
+  maVisibility,
+  onToggleMa,
+  disableIntradayRanges = false,
+  intradayDisabledReason = 'fugle-api-key',
+}: {
+  symbol: string;
+} & HistoryControls): JSX.Element {
   const history = useQuery({
     queryKey: ['stock-history', symbol, range],
     queryFn: () => fetchStockHistory(symbol, range),
     retry: false,
   });
+  const displayLabels = history.data
+    ? getHistoryDisplayLabels(history.data.priceBasis, history.data.timeframe)
+    : null;
 
-  const toggleMa = (key: keyof MaVisibility) => {
-    setMaVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div className="dashboard-card" style={{ padding: '12px 16px' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600, marginRight: '4px' }}>期間</span>
-            {RANGES.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className="btn-control"
-                aria-pressed={range === option.value}
-                onClick={() => setRange(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600, marginRight: '4px' }}>均線</span>
-            {MA_KEYS.map((key) => (
-              <button
-                key={key}
-                type="button"
-                className="btn-control"
-                aria-pressed={maVisibility[key]}
-                onClick={() => toggleMa(key)}
-              >
-                {key.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        </div>
+    <section aria-label="股價走勢" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="chart-legend" aria-label="均線圖例，點選切換顯示">
+        {MA_KEYS.map(({ key, label }) => {
+          const visible = maVisibility[key];
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`legend-item series-legend-toggle${visible ? '' : ' is-off'}`}
+              aria-pressed={visible}
+              aria-label={`${label} ${visible ? '顯示中' : '已隱藏'}，點選切換`}
+              title={`切換 ${label}`}
+              onClick={() => onToggleMa(key)}
+            >
+              <span aria-hidden="true" className={`legend-swatch ${key}`} />
+              {label}
+            </button>
+          );
+        })}
+        {history.data?.priceBasis === 'average' && (
+          <span
+            data-testid="average-price-legend"
+            style={{ color: '#374151', fontSize: '0.75rem', fontWeight: 600 }}
+          >
+            平均價
+          </span>
+        )}
+        <span className="chart-toggle-hint">點按左側圖例可切換顯示</span>
       </div>
+      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0' }}>
+        {displayLabels?.movingAverageLabel ?? 'MA 依目前 K 線週期計算'}
+      </p>
 
-      {history.isPending && <p style={{ color: '#64748b' }}>歷史資料載入中…</p>}
-      {history.isError && <p style={{ color: '#dc2626' }}>歷史資料載入失敗，請稍後再試</p>}
-      {history.isSuccess && history.data.candles.length === 0 && <p style={{ color: '#64748b' }}>暫無歷史交易資料</p>}
+      {history.isPending && <p style={{ color: 'var(--text-muted)' }}>歷史資料載入中…</p>}
+      {history.isError && <p style={{ color: 'var(--color-up)' }}>歷史資料載入失敗，請稍後再試</p>}
+      {history.isSuccess && history.data.candles.length === 0 && (
+        <p style={{ color: 'var(--text-muted)' }}>暫無歷史交易資料</p>
+      )}
       {history.isSuccess && history.data.candles.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div className="chart-card">
-            <StockHistoryChart candles={history.data.candles} maVisibility={maVisibility} />
+        <>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              margin: 0,
+              fontSize: '0.8rem',
+              color: 'var(--text-muted)',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}
+          >
+            <span>
+              {displayLabels?.timeframeLabel ?? '日 K'} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
+            </span>
+            {history.data.source && (
+              <span
+                data-testid="chart-source-badge"
+                style={{
+                  fontSize: '0.75rem',
+                  background: '#f0f2f1',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  color: '#4e5551',
+                }}
+              >
+                {formatChartSourceText(history.data.source)}
+              </span>
+            )}
           </div>
-
-          <div className="table-card">
-            <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: '#64748b' }}>最近交易資料</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>日期</th>
-                  <th>開盤</th>
-                  <th>最高</th>
-                  <th>最低</th>
-                  <th>收盤</th>
-                  <th>成交量</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.data.candles
-                  .slice(-5)
-                  .reverse()
-                  .map((candle) => (
-                    <tr key={candle.date}>
-                      <td>{candle.date}</td>
-                      <td>{candle.open.toLocaleString()}</td>
-                      <td>{candle.high.toLocaleString()}</td>
-                      <td>{candle.low.toLocaleString()}</td>
-                      <td>{candle.close.toLocaleString()}</td>
-                      <td>{candle.volume.toLocaleString()}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+          <StockHistoryChart
+            candles={history.data.candles}
+            timeframe={history.data.timeframe}
+            priceBasis={history.data.priceBasis}
+            maVisibility={maVisibility}
+          />
+          <div
+            className="periods"
+            role="group"
+            aria-label={displayLabels?.periodsAriaLabel ?? 'K 線期間'}
+          >
+            {HISTORY_RANGES.map((option) => {
+              const isIntraday = isIntradayRange(option.value);
+              const isDisabled = disableIntradayRanges && isIntraday;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={isDisabled}
+                  className={`period-btn${range === option.value ? ' active' : ''}`}
+                  aria-pressed={range === option.value}
+                  aria-disabled={isDisabled}
+                  title={
+                    isDisabled
+                      ? intradayDisabledReason === 'esb-official-daily'
+                        ? '興櫃目前提供官方日均價資料'
+                        : '5 分 K 需設定 Fugle API Key'
+                      : undefined
+                  }
+                  onClick={() => onRangeChange(option.value)}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
-        </div>
+        </>
       )}
     </section>
+  );
+}
+
+function getPriceClass(value: number | null, prevPrice: number | null): string | undefined {
+  if (value === null || prevPrice === null) return undefined;
+  if (value > prevPrice) return 'price-up';
+  if (value < prevPrice) return 'price-down';
+  return undefined;
+}
+
+// Independent recent-trading card: always daily OHLCV. On an intraday chart
+// range it runs its own cached 1m daily query; on a daily range it joins the
+// same cache key the chart already uses, so no duplicate provider I/O.
+export function StockHistoryTable({ symbol, range }: { symbol: string; range: HistoryRange }): JSX.Element {
+  const tableRange: HistoryRange = isIntradayRange(range) ? '1m' : range;
+  const table = useQuery({
+    queryKey: ['stock-history', symbol, tableRange],
+    queryFn: () => fetchStockHistory(symbol, tableRange),
+    retry: false,
+  });
+
+  const priceBasis = table.data?.priceBasis ?? 'close';
+  const tableCandles: ReadonlyArray<Candle> | null = table.data?.candles ?? null;
+  const rows = (tableCandles ?? []).map((candle, index, arr) => ({
+    ...candle,
+    prevPrice:
+      index > 0 ? (priceBasis === 'average' ? arr[index - 1].average : arr[index - 1].close) : null,
+  }));
+  const displayRows = rows.slice(-5).reverse();
+
+  return (
+    <div className="table-card">
+      <div className="section-head">
+        <h3>近期交易資料</h3>
+        <span className="mini-meta" style={{ fontSize: '12px' }}>
+          最近 5 個交易日
+        </span>
+      </div>
+      {table.isPending && <p style={{ color: 'var(--text-muted)' }}>表格載入中…</p>}
+      {table.isError && <p style={{ color: 'var(--color-up)' }}>表格載入失敗，請稍後再試</p>}
+      {tableCandles !== null && tableCandles.length > 0 && (
+        <table data-testid="recent-trading-table">
+          <thead>
+            <tr>
+              {getHistoryTableHeaders(priceBasis).map((header) => (
+                <th key={header}>{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map((candle) => (
+              <tr key={candle.date}>
+                <td>{candle.date}</td>
+                {priceBasis === 'average' ? (
+                  <>
+                    <td>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
+                    <td>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
+                    <td className={getPriceClass(candle.average, candle.prevPrice)}>
+                      {candle.average === null ? '—' : candle.average.toLocaleString()}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className={getPriceClass(candle.open, candle.prevPrice)}>
+                      {candle.open === null ? '—' : candle.open.toLocaleString()}
+                    </td>
+                    <td className={getPriceClass(candle.close, candle.prevPrice)}>
+                      {candle.close === null ? '—' : candle.close.toLocaleString()}
+                    </td>
+                    <td>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
+                    <td>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
+                  </>
+                )}
+                <td>{candle.volume.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }

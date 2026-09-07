@@ -1,58 +1,99 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
-import type { FormEvent, JSX } from 'react';
+import { useEffect, useRef } from 'react';
+import type { JSX } from 'react';
+import type { Market, StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { toast } from 'sonner';
 import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.js';
 
-const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
+const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至備援資料來源';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
 
-const PROVIDER_LABELS = {
-  fugle: 'Fugle',
-  'twse-mis': 'TWSE MIS',
+const MARKET_LABELS = {
+  TWSE: '上市',
+  TPEX: '上櫃',
+  ESB: '興櫃',
 } as const;
+
+const REFERENCE_LABELS = {
+  previous_close: '前一交易日收盤',
+  previous_average: '前一交易日均價',
+} as const;
+
+function formatReference(referencePrice: number | null, referencePriceType: 'previous_close' | 'previous_average'): string {
+  return `${REFERENCE_LABELS[referencePriceType]} ${referencePrice === null ? '—' : referencePrice.toLocaleString()}`;
+}
+
+const COLOR_UP = '#d94b45';
+const COLOR_DOWN = '#169a52';
+const COLOR_FLAT = '#59605c';
+function isOfficialFallbackProvider(provider: StockQuoteProvider): boolean {
+  return provider === 'twse-mis' || provider === 'twse-openapi' || provider === 'tpex-openapi';
+}
+
+function changeClass(value: number | null): string {
+  if (value === null) return 'price-neutral';
+  if (value > 0) return 'price-up';
+  if (value < 0) return 'price-down';
+  return 'price-neutral';
+}
 
 function formatSigned(value: number, suffix = ''): string {
   return `${value >= 0 ? '+' : ''}${value}${suffix}`;
 }
+function formatNullable(value: number | null): string {
+  return value === null ? '—' : value.toLocaleString();
+}
+
+export interface QuoteResolvedInfo {
+  provider: StockQuoteProvider;
+  asOf: string | null;
+  fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
+  fallbackUsed: boolean;
+}
 
 export function StockQuotePanel({
-  onSymbolSubmitted,
-  onQuoteResolved,
   requestedSymbol,
+  searchSeq,
+  onQuoteResolved,
+  isInWatchlist,
+  onToggleWatchlist,
 }: {
-  onSymbolSubmitted?: (symbol: string) => void;
-  onQuoteResolved?: (stock: { symbol: string; name: string }) => void;
   requestedSymbol?: string | null;
+  searchSeq?: number;
+  onQuoteResolved?: (
+    stock: { symbol: string; name: string; market: Market },
+    info: QuoteResolvedInfo,
+  ) => void;
+  isInWatchlist?: boolean;
+  onToggleWatchlist?: () => void;
 }): JSX.Element {
-  const [input, setInput] = useState('');
-  const [submitted, setSubmitted] = useState<string | null>(null);
-  const previousProvider = useRef<'fugle' | 'twse-mis' | null>(null);
-
-  useEffect(() => {
-    if (requestedSymbol !== undefined && requestedSymbol !== null && requestedSymbol !== submitted) {
-      setInput(requestedSymbol);
-      setSubmitted(requestedSymbol);
-    }
-  }, [requestedSymbol, submitted]);
+  const previousProvider = useRef<StockQuoteProvider | null>(null);
 
   const quote = useQuery({
-    queryKey: ['stock-quote', submitted],
+    queryKey: ['stock-quote', requestedSymbol, searchSeq],
     queryFn: () => {
-      if (submitted === null) {
+      if (requestedSymbol === null || requestedSymbol === undefined) {
         throw new Error('No symbol submitted');
       }
-      return fetchStockQuote(submitted);
+      return fetchStockQuote(requestedSymbol);
     },
-    enabled: submitted !== null,
+    enabled: requestedSymbol !== null && requestedSymbol !== undefined,
     retry: false,
   });
 
   useEffect(() => {
-    if (quote.isSuccess && quote.data && submitted !== null && quote.data.symbol === submitted) {
-      onQuoteResolved?.({ symbol: quote.data.symbol, name: quote.data.name });
+    if (quote.isSuccess && quote.data && quote.data.symbol === requestedSymbol) {
+      onQuoteResolved?.(
+        { symbol: quote.data.symbol, name: quote.data.name, market: quote.data.market },
+        {
+          provider: quote.data.source.provider,
+          asOf: quote.data.source.asOf,
+          fallbackReason: quote.data.source.fallbackReason,
+          fallbackUsed: quote.data.source.fallbackUsed,
+        },
+      );
     }
-  }, [quote.isSuccess, quote.data, submitted, onQuoteResolved]);
+  }, [quote.isSuccess, quote.data, requestedSymbol, onQuoteResolved]);
 
   useEffect(() => {
     const data = quote.data;
@@ -64,80 +105,192 @@ export function StockQuotePanel({
     }
     const current = data.source.provider;
     const previous = previousProvider.current;
-    if (previous === null && current === 'twse-mis' && data.source.fallbackUsed) {
+    const currentIsFallback = isOfficialFallbackProvider(current);
+    const previousWasFallback = previous !== null && isOfficialFallbackProvider(previous);
+    if (previous === null && currentIsFallback && data.source.fallbackUsed) {
+      if (data.source.fallbackReason !== 'config_missing') {
+        toast(FALLBACK_TOAST, { duration: 5000 });
+      }
+    } else if (previous === 'fugle' && currentIsFallback) {
       toast(FALLBACK_TOAST, { duration: 5000 });
-    } else if (previous === 'fugle' && current === 'twse-mis') {
-      toast(FALLBACK_TOAST, { duration: 5000 });
-    } else if (previous === 'twse-mis' && current === 'fugle') {
+    } else if (previousWasFallback && current === 'fugle') {
       toast(RECOVERY_TOAST, { duration: 5000 });
     }
     previousProvider.current = current;
   }, [quote.data]);
 
-  const onSubmit = (event: FormEvent): void => {
-    event.preventDefault();
-    const symbol = input.trim();
-    if (symbol.length === 0) {
-      return;
-    }
-    // Re-submitting the same symbol must still refresh: the query key would
-    // otherwise be unchanged and nothing would refetch.
-    if (symbol === submitted) {
-      void quote.refetch();
-    } else {
-      setSubmitted(symbol);
-    }
-    onSymbolSubmitted?.(symbol);
-  };
-
   const source = quote.data?.source;
 
+  if (requestedSymbol === null || requestedSymbol === undefined) {
+    return <section aria-label="個股行情" />;
+  }
+
   return (
-    <section>
-      <form onSubmit={onSubmit} className="search-form">
-        <input
-          aria-label="股票代碼"
-          placeholder="2330"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          className="search-input"
-        />
-        <button type="submit" className="btn-primary">查詢</button>
-      </form>
-      {quote.isPending && submitted !== null && <p style={{ color: '#64748b', margin: '8px 0 0' }}>載入中…</p>}
+    <section aria-label="個股行情">
+      {quote.isPending && <p style={{ color: 'var(--text-muted)', margin: '8px 0 0' }}>載入中…</p>}
       {quote.isError && (
         quote.error instanceof StockQuoteRequestError && quote.error.status === 404 ? (
-          <p style={{ color: '#dc2626', margin: '8px 0 0' }}>查無此股票代號</p>
+          <p style={{ color: 'var(--color-up)', margin: '8px 0 0' }}>查無此股票代號</p>
         ) : (
-          <p style={{ color: '#dc2626', margin: '8px 0 0' }}>查詢失敗，請稍後再試</p>
+          <p style={{ color: 'var(--color-up)', margin: '8px 0 0' }}>查詢失敗，請稍後再試</p>
         )
       )}
       {quote.isSuccess && source && (
-        <div data-testid="stock-quote-info" style={{ marginTop: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap', marginBottom: '6px' }}>
-            <span data-testid="stock-quote-title" style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
+        <div data-testid="stock-quote-info">
+          <div className="eyebrow">焦點個股分析</div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '9px',
+              flexWrap: 'wrap',
+              marginBottom: '10px',
+            }}
+          >
+            <span data-testid="stock-quote-title" style={{ fontSize: '21px', fontWeight: 'bold', margin: 0 }}>
               {quote.data.symbol} {quote.data.name}
             </span>
-            <span data-testid="stock-quote-price" style={{ fontSize: '1.75rem', fontWeight: '800', letterSpacing: '-0.02em' }}>
-              {quote.data.price}
+            <span data-testid="stock-quote-market" className="badge-market">
+              {MARKET_LABELS[quote.data.market]}
             </span>
-            <span
-              style={{
-                fontSize: '1.1rem',
-                fontWeight: '700',
-                color: quote.data.change > 0 ? '#dc2626' : quote.data.change < 0 ? '#16a34a' : 'inherit',
-              }}
+            <button
+              type="button"
+              onClick={onToggleWatchlist}
+              disabled={onToggleWatchlist === undefined}
+              aria-pressed={isInWatchlist === true}
+              aria-label={isInWatchlist === true ? '從自選移除' : '加入自選'}
+              title={isInWatchlist === true ? '從自選移除' : '加入自選'}
+              className="btn-star"
             >
-              {formatSigned(quote.data.change)} ({formatSigned(quote.data.changePercent, '%')})
-            </span>
+              {isInWatchlist === true ? (
+                <>
+                  <span className="star-icon" aria-hidden="true">★</span> 已在觀察
+                </>
+              ) : (
+                '☆ 加入觀察'
+              )}
+            </button>
           </div>
-          <div className="quote-meta-row">
-            <span>上市 · 資料來源：{PROVIDER_LABELS[source.provider]}</span>
-            {source.cacheHit && <span className="badge-cache">快取</span>}
-            {source.asOf !== null && <span>資料時間：{new Date(source.asOf).toLocaleString()}</span>}
+          <div
+            role="group"
+            aria-label={describePriceMove(quote.data.price, quote.data.change, quote.data.changePercent)}
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: '14px',
+              flexWrap: 'wrap',
+              marginBottom: '8px',
+            }}
+          >
+            <span
+              data-testid="stock-quote-price"
+              className={changeClass(quote.data.change)}
+              style={{ fontSize: '2rem', fontWeight: '800', letterSpacing: '-0.02em' }}
+            >
+              {formatNullable(quote.data.price)}
+            </span>
+            <ChangeLine
+              change={quote.data.change}
+              changePercent={quote.data.changePercent}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '13px',
+              color: 'var(--text-muted)',
+              marginBottom: '4px',
+            }}
+          >
+            <span>{formatReference(quote.data.referencePrice, quote.data.referencePriceType)}</span>
+            {source.cacheHit && <span className="badge-cache">Cache</span>}
+          </div>
+          <div data-testid="focus-quote-grid" className="focus-quote-grid">
+            <QuoteCell label="開盤價" value={formatNullable(quote.data.openPrice)} compare={quote.data.openPrice} referencePrice={quote.data.referencePrice} />
+            <QuoteCell label="最高價" value={formatNullable(quote.data.highPrice)} compare={quote.data.highPrice} referencePrice={quote.data.referencePrice} />
+            <QuoteCell label="最低價" value={formatNullable(quote.data.lowPrice)} compare={quote.data.lowPrice} referencePrice={quote.data.referencePrice} />
+            <QuoteCell
+              label={quote.data.tradeVolumeUnit === 'share' ? '成交量（股）' : '成交量（張）'}
+              value={quote.data.tradeVolume === null ? '—' : quote.data.tradeVolume.toLocaleString()}
+            />
+            <QuoteCell label="漲停價" value={formatNullable(quote.data.limitUpPrice)} tone="up" />
+            <QuoteCell label="跌停價" value={formatNullable(quote.data.limitDownPrice)} tone="down" />
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+function describePriceMove(price: number | null, change: number | null, changePercent: number | null): string {
+  if (change === null || changePercent === null) {
+    return `目前股價 ${formatNullable(price)}，漲跌 —`;
+  }
+  return `目前股價 ${formatNullable(price)}，較前一交易日${change > 0 ? '上漲' : change < 0 ? '下跌' : '持平'} ${Math.abs(change)}，漲跌幅 ${changePercent}%`;
+}
+
+function ChangeLine({
+  change,
+  changePercent,
+}: {
+  change: number | null;
+  changePercent: number | null;
+}): JSX.Element {
+  if (change === null || changePercent === null) {
+    return (
+      <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_FLAT }}>
+        —
+      </span>
+    );
+  }
+  if (change > 0) {
+    return (
+      <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_UP }}>
+        ▲ {change} ({formatSigned(changePercent, '%')})
+      </span>
+    );
+  }
+  if (change < 0) {
+    return (
+      <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_DOWN }}>
+        ▼ {Math.abs(change)} ({formatSigned(changePercent, '%')})
+      </span>
+    );
+  }
+  return (
+    <span data-testid="stock-quote-change" style={{ fontSize: '1.1rem', fontWeight: '700', color: COLOR_FLAT }}>
+      0 (0.00%)
+    </span>
+  );
+}
+
+function QuoteCell({
+  label,
+  value,
+  compare,
+  referencePrice,
+  tone,
+}: {
+  label: string;
+  value: string;
+  compare?: number | null;
+  referencePrice?: number | null;
+  tone?: 'up' | 'down';
+}): JSX.Element {
+  let toneClass = '';
+  if (tone === 'up') {
+    toneClass = 'price-up';
+  } else if (tone === 'down') {
+    toneClass = 'price-down';
+  } else if (compare !== null && compare !== undefined && referencePrice !== null && referencePrice !== undefined) {
+    toneClass = compare > referencePrice ? 'price-up' : compare < referencePrice ? 'price-down' : '';
+  }
+  return (
+    <div className="focus-quote-cell">
+      <span className="focus-quote-cell-label">{label}</span>
+      <span className={`focus-quote-cell-value ${toneClass}`}>{value}</span>
+    </div>
   );
 }

@@ -5,7 +5,13 @@ import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
 import { epochMsToIsoOrNull } from './timestamp.js';
 import { TwseMisDecodeError, TwseMisHttpError, TwseMisNetworkError, TwseMisTimeoutError } from './twse-mis-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
-import { TwseMisQuoteSchema, parseFiniteNumber, round2 } from './twse-mis-quote.schema.js';
+import {
+  TwseMisEntrySchema,
+  TwseMisQuoteSchema,
+  parseFiniteNumber,
+  parseMisTradeDate,
+  round2,
+} from './twse-mis-quote.schema.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 const TWSE_MIS_URL = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
@@ -38,25 +44,44 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
       const mis = yield* Schema.decodeUnknown(TwseMisQuoteSchema)(raw).pipe(
         Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })),
       );
-      const entry = mis.msgArray.find((item) => item.c === symbol);
-      if (!entry) {
+      const rawEntry = mis.msgArray.find(
+        (item): item is Record<string, unknown> =>
+          typeof item === 'object' && item !== null && (item as { c?: unknown }).c === symbol,
+      );
+      if (!rawEntry) {
         return yield* new TwseMisDecodeError({ stage: 'value' });
       }
+      const entry = yield* Schema.decodeUnknown(TwseMisEntrySchema)(rawEntry).pipe(
+        Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })),
+      );
 
       const price = parseFiniteNumber(entry.z);
-      const previousClose = parseFiniteNumber(entry.y);
-      if (price === null || previousClose === null || previousClose <= 0) {
+      const referencePrice = parseFiniteNumber(entry.y);
+      if (price === null || referencePrice === null || referencePrice <= 0) {
         return yield* new TwseMisDecodeError({ stage: 'value' });
       }
 
+      // Enriched session fields are best-effort: `-`/absent/invalid degrade
+      // to null. Limit prices come only from u/w — never computed.
       const quote = yield* Schema.decodeUnknown(StockQuoteSchema)({
         symbol: entry.c,
         name: entry.n,
         market: entry.ex === 'tse' ? 'TWSE' : 'TPEX',
         price,
-        previousClose,
-        change: round2(price - previousClose),
-        changePercent: round2(((price - previousClose) / previousClose) * 100),
+        referencePrice,
+        referencePriceType: 'previous_close' as const,
+        change: round2(price - referencePrice),
+        changePercent: round2(((price - referencePrice) / referencePrice) * 100),
+        tradeDate: parseMisTradeDate(entry.d),
+        openPrice: entry.o === undefined ? null : parseFiniteNumber(entry.o),
+        highPrice: entry.h === undefined ? null : parseFiniteNumber(entry.h),
+        lowPrice: entry.l === undefined ? null : parseFiniteNumber(entry.l),
+        tradeVolume: entry.v === undefined ? null : parseFiniteNumber(entry.v),
+        // MIS v is natively lots (張), verified live against the daily share
+        // count — same unit as the Fugle side, so no conversion.
+        tradeVolumeUnit: 'lot' as const,
+        limitUpPrice: entry.u === undefined ? null : parseFiniteNumber(entry.u),
+        limitDownPrice: entry.w === undefined ? null : parseFiniteNumber(entry.w),
       }).pipe(Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })));
       return { quote, asOf: toIsoOrNull(entry.tlong) };
     });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyMovingAverages } from './moving-average.js';
-import type { BaseCandle } from './moving-average.js';
+import { applyAverageMovingAverages, applyMovingAverages } from './moving-average.js';
+import type { AverageBasisCandle, BaseCandle } from './moving-average.js';
 
 function makeCandles(closes: number[]): BaseCandle[] {
   return closes.map((close, i) => {
@@ -14,6 +14,17 @@ function makeCandles(closes: number[]): BaseCandle[] {
       volume: 1000,
     };
   });
+}
+function makeAverageCandles(averages: Array<number | null>): AverageBasisCandle[] {
+  return averages.map((average, i) => ({
+    date: `2026-01-${String(i + 1).padStart(2, '0')}`,
+    open: null,
+    high: average,
+    low: average,
+    close: null,
+    average,
+    volume: 1000,
+  }));
 }
 
 describe('applyMovingAverages pure helper', () => {
@@ -59,5 +70,12 @@ describe('applyMovingAverages pure helper', () => {
     const candles = makeCandles([10, 10, 10, 10, 11.555]);
     const result = applyMovingAverages(candles);
     expect(result[4].ma5).toBe(10.31);
+  });
+  it('computes average-basis MA from recent valid observations and leaves null days null', () => {
+    const result = applyAverageMovingAverages(makeAverageCandles([10, null, 12, 13, 14, 15]));
+
+    expect(result[1].ma5).toBeNull();
+    expect(result[4].ma5).toBeNull();
+    expect(result[5].ma5).toBe(12.8);
   });
 });

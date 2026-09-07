@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --port 5173",
+    "dev:tunnel": "VITE_API_URL=\"\" vite --port 5173",
     "preview": "vite preview --port 4173",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json"

@@ -1,21 +1,35 @@
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import { CandlestickSeries, HistogramSeries, LineSeries, createChart } from 'lightweight-charts';
-import type { ISeriesApi } from 'lightweight-charts';
-import type { Candle } from '@tw-stock-dashboard/contracts';
+import {
+  CandlestickSeries,
+  CrosshairMode,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
+  createChart,
+} from 'lightweight-charts';
+import type { ISeriesApi, Time } from 'lightweight-charts';
+import type { Candle, PriceBasis, Timeframe } from '@tw-stock-dashboard/contracts';
+import {
+  formatChartCrosshairTime,
+  formatChartTick,
+  isIntradayAxis,
+  toChartTime,
+} from './chart-time.js';
 
 // Taiwan market convention: up is red, down is green. Kept as plain
-// component constants — no theme system until a second theme exists.
-const UP_COLOR = '#f23645';
-const DOWN_COLOR = '#089981';
-const UP_VOLUME_COLOR = 'rgba(242, 54, 69, 0.5)';
-const DOWN_VOLUME_COLOR = 'rgba(8, 153, 129, 0.5)';
+const UP_COLOR = '#d94b45';
+const DOWN_COLOR = '#169a52';
+const UP_VOLUME_COLOR = 'rgba(217, 75, 69, 0.2)';
+const DOWN_VOLUME_COLOR = 'rgba(22, 154, 82, 0.2)';
 
 // Component-level color constants for simple moving average lines.
 const MA5_COLOR = '#ff9800';
 const MA10_COLOR = '#2196f3';
 const MA20_COLOR = '#9c27b0';
 const MA60_COLOR = '#4caf50';
+const AVERAGE_COLOR = '#374151';
+const ESB_VOLUME_COLOR = 'rgba(107, 114, 128, 0.25)';
 
 export interface MaVisibility {
   ma5: boolean;
@@ -26,16 +40,41 @@ export interface MaVisibility {
 
 const DEFAULT_MA_VISIBILITY: MaVisibility = {
   ma5: true,
-  ma10: true,
-  ma20: true,
-  ma60: true,
+  ma10: false,
+  ma20: false,
+  ma60: false,
 };
+export function toAveragePriceSeriesData(candles: ReadonlyArray<Candle>, timeframe: Timeframe) {
+  return candles
+    .filter((candle): candle is Candle & { average: number } => candle.average !== null)
+    .map((candle) => ({
+      time: toChartTime(candle.date, timeframe),
+      value: candle.average,
+    }));
+}
+
+export function toVolumeSeriesData(candles: ReadonlyArray<Candle>, timeframe: Timeframe) {
+  return candles.map((candle) => ({
+    time: toChartTime(candle.date, timeframe),
+    value: candle.volume,
+    color:
+      candle.open !== null && candle.close !== null
+        ? candle.close >= candle.open
+          ? UP_VOLUME_COLOR
+          : DOWN_VOLUME_COLOR
+        : ESB_VOLUME_COLOR,
+  }));
+}
 
 export function StockHistoryChart({
   candles,
+  timeframe,
+  priceBasis,
   maVisibility = DEFAULT_MA_VISIBILITY,
 }: {
   candles: ReadonlyArray<Candle>;
+  timeframe: Timeframe;
+  priceBasis: PriceBasis;
   maVisibility?: MaVisibility;
 }): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -45,14 +84,42 @@ export function StockHistoryChart({
   const ma10SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma60SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const averageSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const timeframeRef = useRef<Timeframe>(timeframe);
+
+  useEffect(() => {
+    timeframeRef.current = timeframe;
+  }, [timeframe]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
-    const chart = createChart(container, { autoSize: true });
+    const chart = createChart(container, {
+      autoSize: true,
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#383e3a',
+        },
+        horzLine: {
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#383e3a',
+        },
+      },
+      localization: {
+        locale: 'zh-TW',
+        timeFormatter: (time: Time) => formatChartCrosshairTime(time, timeframeRef.current),
+      },
+      timeScale: {
+        timeVisible: isIntradayAxis(timeframeRef.current),
+        secondsVisible: false,
+        tickMarkFormatter: (time: Time) => formatChartTick(time, timeframeRef.current),
+      },
+    });
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: UP_COLOR,
       downColor: DOWN_COLOR,
@@ -65,33 +132,43 @@ export function StockHistoryChart({
       priceFormat: { type: 'volume' },
       priceScaleId: '',
     });
+    const averageSeries = chart.addSeries(LineSeries, {
+      color: AVERAGE_COLOR,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+    });
     const ma5Series = chart.addSeries(LineSeries, {
       color: MA5_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
     const ma10Series = chart.addSeries(LineSeries, {
       color: MA10_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
     const ma20Series = chart.addSeries(LineSeries, {
       color: MA20_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
     const ma60Series = chart.addSeries(LineSeries, {
       color: MA60_COLOR,
       lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
 
-    candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.25 } });
-    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+    candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.22 } });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -99,6 +176,7 @@ export function StockHistoryChart({
     ma5SeriesRef.current = ma5Series;
     ma10SeriesRef.current = ma10Series;
     ma20SeriesRef.current = ma20Series;
+    averageSeriesRef.current = averageSeries;
     ma60SeriesRef.current = ma60Series;
 
     return () => {
@@ -109,6 +187,7 @@ export function StockHistoryChart({
       ma5SeriesRef.current = null;
       ma10SeriesRef.current = null;
       ma20SeriesRef.current = null;
+      averageSeriesRef.current = null;
       ma60SeriesRef.current = null;
     };
   }, []);
@@ -117,51 +196,64 @@ export function StockHistoryChart({
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
     const volumeSeries = volumeSeriesRef.current;
+    const averageSeries = averageSeriesRef.current;
     const ma5Series = ma5SeriesRef.current;
     const ma10Series = ma10SeriesRef.current;
     const ma20Series = ma20SeriesRef.current;
     const ma60Series = ma60SeriesRef.current;
-    if (!chart || !candleSeries || !volumeSeries || !ma5Series || !ma10Series || !ma20Series || !ma60Series) {
+    if (
+      !chart ||
+      !candleSeries ||
+      !volumeSeries ||
+      !averageSeries ||
+      !ma5Series ||
+      !ma10Series ||
+      !ma20Series ||
+      !ma60Series
+    ) {
       return;
     }
+    const ohlc = candles.filter(
+      (c): c is Candle & { open: number; high: number; low: number; close: number } =>
+        c.open !== null && c.high !== null && c.low !== null && c.close !== null,
+    );
     candleSeries.setData(
-      candles.map((candle) => ({
-        time: candle.date,
+      ohlc.map((candle) => ({
+        time: toChartTime(candle.date, timeframe),
         open: candle.open,
         high: candle.high,
         low: candle.low,
         close: candle.close,
       })),
     );
-    volumeSeries.setData(
-      candles.map((candle) => ({
-        time: candle.date,
-        value: candle.volume,
-        color: candle.close >= candle.open ? UP_VOLUME_COLOR : DOWN_VOLUME_COLOR,
-      })),
-    );
+    volumeSeries.setData(toVolumeSeriesData(candles, timeframe));
+    averageSeries.setData(priceBasis === 'average' ? toAveragePriceSeriesData(candles, timeframe) : []);
     ma5Series.setData(
       candles
         .filter((c): c is typeof c & { ma5: number } => c.ma5 !== null)
-        .map((c) => ({ time: c.date, value: c.ma5 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma5 })),
     );
     ma10Series.setData(
       candles
         .filter((c): c is typeof c & { ma10: number } => c.ma10 !== null)
-        .map((c) => ({ time: c.date, value: c.ma10 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma10 })),
     );
     ma20Series.setData(
       candles
         .filter((c): c is typeof c & { ma20: number } => c.ma20 !== null)
-        .map((c) => ({ time: c.date, value: c.ma20 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma20 })),
     );
     ma60Series.setData(
       candles
         .filter((c): c is typeof c & { ma60: number } => c.ma60 !== null)
-        .map((c) => ({ time: c.date, value: c.ma60 })),
+        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma60 })),
     );
     chart.timeScale().fitContent();
-  }, [candles]);
+  }, [candles, timeframe, priceBasis]);
+
+  useEffect(() => {
+    chartRef.current?.timeScale().applyOptions({ timeVisible: isIntradayAxis(timeframe) });
+  }, [timeframe]);
 
   useEffect(() => {
     ma5SeriesRef.current?.applyOptions({ visible: maVisibility.ma5 });
@@ -173,7 +265,7 @@ export function StockHistoryChart({
   return (
     <div>
       <div ref={containerRef} data-testid="stock-history-chart" className="chart-wrapper" />
-      <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '8px 0 0' }}>
+      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '8px 0 0' }}>
         TradingView Lightweight Charts™
         <br />
         Copyright © 2025 TradingView, Inc.

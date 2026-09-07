@@ -3,9 +3,16 @@ import { Test } from '@nestjs/testing';
 import { PinoLogger } from 'nestjs-pino';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteModule } from './stock-quote.module.js';
+import { CacheModule } from '../../libs/cache/cache.module.js';
+import { LoggerModule } from '../../libs/observability/logger.module.js';
+import { UniverseModule } from '../../libs/securities/universe.module.js';
+import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
+
+function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
+  return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
+}
 
 interface CapturedLog {
   level: 'info' | 'warn' | 'error';
@@ -41,6 +48,19 @@ const FUGLE_BODY = {
 };
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
+const OFFICIAL_TWSE_BODY = [
+  {
+    Date: '1150904',
+    Code: '2330',
+    Name: '台積電',
+    TradeVolume: '14102018',
+    OpeningPrice: '2415.00',
+    HighestPrice: '2415.00',
+    LowestPrice: '2390.00',
+    ClosingPrice: '2410.00',
+    Change: '20.0000',
+  },
+];
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
@@ -53,7 +73,7 @@ describe('stock quote domain logs', () => {
   beforeAll(async () => {
     captured = [];
     const moduleRef = await Test.createTestingModule({
-      imports: [LoggerModule, StockQuoteModule],
+      imports: [LoggerModule, CacheModule, UniverseModule, StockQuoteModule],
     })
       .overrideProvider(PinoLogger)
       .useValue(captureLogger(captured))
@@ -78,7 +98,7 @@ describe('stock quote domain logs', () => {
 
   it('logs one served event for a Fugle success', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(FUGLE_BODY)));
+    vi.stubGlobal('fetch', vi.fn(serveUniverseFirst(async () => jsonResponse(FUGLE_BODY))));
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
@@ -99,10 +119,12 @@ describe('stock quote domain logs', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: unknown) =>
-        String(input).includes('api.fugle.tw')
-          ? jsonResponse({ message: 'rate limited' }, 429)
-          : jsonResponse(MIS_BODY),
+      vi.fn(
+        serveUniverseFirst(async (input: unknown) =>
+          String(input).includes('api.fugle.tw')
+            ? jsonResponse({ message: 'rate limited' }, 429)
+            : jsonResponse(MIS_BODY),
+        ),
       ),
     );
 
@@ -115,6 +137,7 @@ describe('stock quote domain logs', () => {
         symbol: '2330',
         from_provider: 'fugle',
         to_provider: 'twse-mis',
+        fallback_reason: 'upstream_unavailable',
         reason: 'http_429',
         upstream_status: 429,
       },
@@ -135,10 +158,12 @@ describe('stock quote domain logs', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: unknown) =>
-        String(input).includes('api.fugle.tw')
-          ? jsonResponse({ message: 'rate limited' }, 429)
-          : jsonResponse(MIS_BODY),
+      vi.fn(
+        serveUniverseFirst(async (input: unknown) =>
+          String(input).includes('api.fugle.tw')
+            ? jsonResponse({ message: 'rate limited' }, 429)
+            : jsonResponse(MIS_BODY),
+        ),
       ),
     );
 
@@ -168,7 +193,7 @@ describe('stock quote domain logs', () => {
 
   it('logs a failed event with safe fields on final 401', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ message: 'unauthorized' }, 401)));
+    vi.stubGlobal('fetch', vi.fn(serveUniverseFirst(async () => jsonResponse({ message: 'unauthorized' }, 401))));
 
     const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
@@ -187,5 +212,33 @@ describe('stock quote domain logs', () => {
         upstream_status: 401,
       },
     ]);
+  });
+
+  it('logs an official fallback event at info level when FUGLE_API_KEY is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        serveUniverseFirst(async (input: unknown) =>
+          String(input).includes('openapi.twse.com.tw')
+            ? jsonResponse(OFFICIAL_TWSE_BODY)
+            : jsonResponse(MIS_BODY),
+        ),
+      ),
+    );
+
+    await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expect(entriesOf(captured, 'info', 'market_data_fallback')).toEqual([
+      {
+        event: 'market_data_fallback',
+        operation: 'quote',
+        symbol: '2330',
+        from_provider: 'fugle',
+        to_provider: 'twse-openapi',
+        fallback_reason: 'config_missing',
+        reason: 'config_missing',
+      },
+    ]);
+    expect(entriesOf(captured, 'warn', 'market_data_fallback')).toHaveLength(0);
   });
 });

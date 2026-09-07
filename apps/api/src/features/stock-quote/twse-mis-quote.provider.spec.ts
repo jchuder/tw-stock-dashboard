@@ -9,9 +9,18 @@ const EXPECTED_QUOTE = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
+  tradeDate: null,
+  openPrice: null,
+  highPrice: null,
+  lowPrice: null,
+  tradeVolume: null,
+  tradeVolumeUnit: 'lot',
+  limitUpPrice: null,
+  limitDownPrice: null,
 };
 
 function okOnce(body: unknown, status = 200): void {
@@ -73,13 +82,78 @@ describe('TwseMisQuoteProvider typed failures', () => {
           name: '測試',
           market: 'TPEX',
           price: 100.1,
-          previousClose: 100,
+          referencePrice: 100,
+          referencePriceType: 'previous_close',
           change: 0.1,
           changePercent: 0.1,
+          tradeDate: null,
+          openPrice: null,
+          highPrice: null,
+          lowPrice: null,
+          tradeVolume: null,
+  tradeVolumeUnit: 'lot',
+          limitUpPrice: null,
+          limitDownPrice: null,
         },
         asOf: null,
       }),
     );
+  });
+
+  it('decodes enriched d/o/h/l/v/u/w session fields', async () => {
+    okOnce({
+      msgArray: [
+        {
+          ...TSE_ENTRY,
+          d: '20250904',
+          o: '560',
+          h: '570',
+          l: '559',
+          v: '12345678',
+          u: '622',
+          w: '510',
+        },
+      ],
+    });
+
+    const result = await run();
+
+    expect(result).toEqual(
+      Either.right({
+        quote: {
+          ...EXPECTED_QUOTE,
+          tradeDate: '2025-09-04',
+          openPrice: 560,
+          highPrice: 570,
+          lowPrice: 559,
+          tradeVolume: 12345678,
+          limitUpPrice: 622,
+          limitDownPrice: 510,
+        },
+        asOf: null,
+      }),
+    );
+  });
+
+  it('degrades pre-market dash placeholders to null without failing the quote', async () => {
+    okOnce({
+      msgArray: [{ ...TSE_ENTRY, o: '-', h: '-', l: '-', v: '-', u: '-', w: '-', d: '-' }],
+    });
+
+    const result = await run();
+
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+  });
+
+  it('parses comma-grouped cumulative volume', async () => {
+    okOnce({ msgArray: [{ ...TSE_ENTRY, v: '12,345,678' }] });
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.tradeVolume).toBe(12345678);
+    }
   });
 
   it('fails TwseMisDecodeError json stage on invalid JSON', async () => {
@@ -119,7 +193,10 @@ describe('TwseMisQuoteProvider typed failures', () => {
   });
 
   it('fails TwseMisNetworkError when fetch rejects', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('boom')),
+    );
 
     const result = await run();
 
@@ -137,16 +214,18 @@ describe('TwseMisQuoteProvider typed failures', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('TwseMisHttpError');
-      expect(result.left).toMatchObject({ status: 503 });
+      if (result.left._tag === 'TwseMisHttpError') {
+        expect(result.left.status).toBe(503);
+      }
     }
   });
 
   it('fails TwseMisTimeoutError and aborts fetch after 3s of silence', async () => {
-    let captured: AbortSignal | undefined;
+    let signal: AbortSignal | undefined;
     vi.stubGlobal(
       'fetch',
-      vi.fn((_input: unknown, init?: { signal?: AbortSignal }) => {
-        captured = init?.signal;
+      vi.fn(async (_input: unknown, init?: { signal?: AbortSignal }) => {
+        signal = init?.signal;
         return new Promise<Response>(() => {});
       }),
     );
@@ -163,6 +242,23 @@ describe('TwseMisQuoteProvider typed failures', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('TwseMisTimeoutError');
     }
-    expect(captured?.aborted).toBe(true);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('successfully parses when msgArray contains dummy entries from unused exchange channels', async () => {
+    okOnce({
+      msgArray: [
+        TSE_ENTRY,
+        { tv: '-', s: '-', c: '', z: '-' },
+      ],
+    });
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.symbol).toBe('2330');
+      expect(result.right.quote.name).toBe('台積電');
+    }
   });
 });

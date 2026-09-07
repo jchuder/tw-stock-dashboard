@@ -1,11 +1,25 @@
-import { Controller, Get, Inject, InternalServerErrorException, NotFoundException, Param } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Inject,
+  InternalServerErrorException,
+  NotFoundException,
+  Param,
+  Query,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
-import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
-import type { FugleQuoteError } from './fugle-quote.error.js';
+import type { StockQuoteBatchResponse, StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import { StockQuoteService } from './stock-quote.service.js';
+import type { FugleQuoteError } from './fugle-quote.error.js';
+
+import type { OfficialDailyQuoteError } from './official-daily-quote.error.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { addSpanEvent } from '../../libs/observability/tracing.js';
+import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
+import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 
 // Single Effect runtime boundary for this slice. Expected failures translate
 // to the frozen generic 500 after logging safe fields; unexpected defects are
@@ -17,12 +31,21 @@ export class StockQuoteController {
     @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {}
 
+  @Get('quotes')
+  async getQuotes(@Query('symbols') rawSymbols?: string): Promise<StockQuoteBatchResponse> {
+    const symbols = parseSymbols(rawSymbols);
+    return Effect.runPromise(this.stockQuoteService.getQuotes(symbols));
+  }
+
   @Get(':symbol/quote')
   async getQuote(@Param('symbol') symbol: string): Promise<StockQuoteResponse> {
     const result = await Effect.runPromise(Effect.either(this.stockQuoteService.getQuote(symbol)));
     if (Either.isLeft(result)) {
       if (result.left._tag === 'StockNotFoundError') {
         throw new NotFoundException('Stock not found');
+      }
+      if (result.left._tag === 'UniverseUnavailableError') {
+        throw new ServiceUnavailableException('Security universe temporarily unavailable');
       }
       const failure = failedLog(symbol, result.left);
       this.logger.error(failure);
@@ -39,15 +62,38 @@ export class StockQuoteController {
   }
 }
 
-// Safe failure fields only: error tag, provider side, upstream status.
-// Never the API key, headers, bodies, or raw causes.
-function failedLog(symbol: string, error: FugleQuoteError | TwseMisQuoteError) {
+function parseSymbols(rawSymbols: string | undefined): string[] {
+  if (rawSymbols === undefined) {
+    throw new BadRequestException('symbols query is required');
+  }
+  const symbols = [...new Set(rawSymbols.split(',').map((symbol) => symbol.trim()).filter(Boolean))];
+  if (symbols.length === 0 || symbols.length > 20) {
+    throw new BadRequestException('symbols must contain between 1 and 20 values');
+  }
+  return symbols;
+}
+
+function failedLog(
+  symbol: string,
+  error: FugleQuoteError | TwseMisQuoteError | OfficialDailyQuoteError | TpexEsbQuoteError | UniverseUnavailableError,
+) {
   const status = 'status' in error && typeof error.status === 'number' ? error.status : undefined;
+  const provider = error._tag.startsWith('Fugle')
+    ? 'fugle'
+    : error._tag.startsWith('TpexEsb')
+      ? 'tpex-esb'
+      : error._tag === 'OfficialDailyQuoteError'
+        ? error.market === 'TWSE'
+          ? 'twse-openapi'
+          : 'tpex-openapi'
+        : error._tag === 'UniverseUnavailableError'
+          ? 'universe'
+          : 'twse-mis';
   return {
     event: 'market_data_quote_failed',
     operation: 'quote',
     symbol,
-    provider: error._tag.startsWith('Fugle') ? 'fugle' : 'twse-mis',
+    provider,
     error_type: error._tag,
     ...(status !== undefined ? { upstream_status: status } : {}),
   };

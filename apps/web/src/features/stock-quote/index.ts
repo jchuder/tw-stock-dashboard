@@ -1,2 +1,5 @@
-export { StockQuoteRequestError } from './api/stock-quote.api.js';
+export { fetchStockQuoteBatch, fetchStockQuoteBatches, StockQuoteRequestError } from './api/stock-quote.api.js';
 export { StockQuotePanel } from './ui/stock-quote-panel.js';
+export type { QuoteResolvedInfo } from './ui/stock-quote-panel.js';
+export { GlobalStockSearch } from './ui/stock-search.js';
+

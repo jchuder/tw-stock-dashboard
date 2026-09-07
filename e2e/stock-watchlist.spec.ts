@@ -1,18 +1,32 @@
 import { expect, test } from '@playwright/test';
 
+const ENRICHED_QUOTE = {
+  tradeDate: '2026-09-04',
+  openPrice: 560,
+  highPrice: 570,
+  lowPrice: 559,
+  tradeVolume: 12345678,
+  limitUpPrice: 622,
+  limitDownPrice: 510,
+  tradeVolumeUnit: 'lot',
+};
+
 const QUOTE_2330 = {
   symbol: '2330',
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
+  ...ENRICHED_QUOTE,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
-    fetchedAt: '2026-09-05T04:40:00.000Z',
-    asOf: null,
+    fallbackReason: null,
+    fetchedAt: '2026-09-06T03:45:06.000Z',
+    asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
   },
 };
@@ -22,86 +36,112 @@ const QUOTE_2454 = {
   name: '聯發科',
   market: 'TWSE',
   price: 1200,
-  previousClose: 1180,
+  referencePrice: 1180,
+  referencePriceType: 'previous_close',
   change: 20,
   changePercent: 1.69,
+  ...ENRICHED_QUOTE,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
-    fetchedAt: '2026-09-05T04:40:00.000Z',
-    asOf: null,
+    fallbackReason: null,
+    fetchedAt: '2026-09-06T03:45:06.000Z',
+    asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
   },
 };
 
-function makeCandles(symbol: string) {
+function makeCandles(symbol: string, range = '1d') {
+  const intraday = range !== '1m';
   return {
     symbol,
     market: 'TWSE',
-    range: '1m',
-    candles: [
-      {
-        date: '2026-08-05',
-        open: 550,
-        high: 560,
-        low: 540,
-        close: 555,
-        volume: 1000,
-        ma5: null,
-        ma10: null,
-        ma20: null,
-        ma60: null,
-      },
-      {
-        date: '2026-08-06',
-        open: 555,
-        high: 568,
-        low: 550,
-        close: 568,
-        volume: 2000,
-        ma5: 555,
-        ma10: null,
-        ma20: null,
-        ma60: null,
-      },
-    ],
+    range,
+    timeframe: intraday ? '5m' : '1d',
+    volumeUnit: intraday ? 'lot' : 'share',
+    priceBasis: 'close',
+    source: {
+      provider: 'fugle',
+      mode: intraday ? 'intraday' : 'eod',
+      asOf: intraday ? null : '2026-08-06',
+    },
+    candles: intraday
+      ? [
+          { date: '2026-09-04T09:00:00.000+08:00', open: 551, high: 561, low: 541, close: 555, average: null, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
+          { date: '2026-09-04T09:05:00.000+08:00', open: 555, high: 566, low: 545, close: 560, average: null, volume: 900, ma5: 555, ma10: null, ma20: null, ma60: null },
+        ]
+      : [
+          { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, average: null, volume: 1000, ma5: null, ma10: null, ma20: null, ma60: null },
+          { date: '2026-08-06', open: 555, high: 566, low: 545, close: 560, average: null, volume: 2000, ma5: 555, ma10: null, ma20: null, ma60: null },
+        ],
   };
 }
 
-test('A & B: Add to watchlist and duplicate protection', async ({ page }) => {
+function historyRoute(symbol: string) {
+  return async (route: import('@playwright/test').Route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    const range = new URL(route.request().url()).searchParams.get('range') ?? '1d';
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles(symbol, range)) });
+  };
+}
+
+test('A & B: Seeded watchlist on first run, add new stock to watchlist, and duplicate protection', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
   });
-  await page.route('**/api/v1/stocks/2330/history*', (route) => {
+  await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
+  await page.route('**/api/v1/stocks/2454/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2454) });
   });
+  await page.route('**/api/v1/stocks/2454/history*', historyRoute('2454'));
 
   await page.goto('/');
 
-  // Search 2330
-  await page.getByPlaceholder('2330').fill('2330');
-  await page.getByRole('button', { name: '查詢' }).click();
+  // First run seeds 2330 and autofocuses it
+  const watch2330 = page.getByTestId('watchlist-item-2330');
+  await expect(watch2330).toBeVisible();
+  await expect(watch2330.getByRole('button', { name: '2330 台積電', exact: true })).toBeVisible();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
 
-  // Add button appears and can be clicked
-  const addBtn = page.getByRole('button', { name: '加入自選' });
-  await expect(addBtn).toBeVisible();
-  await addBtn.click();
+  // Search 2454 to add a new stock
+  await page.getByPlaceholder('請輸入股票代號').fill('2454');
+  await page.getByRole('button', { name: '搜尋' }).click();
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2454 聯發科');
+
+  // Star action beside the title adds to the watchlist
+  const starBtn = page.getByRole('button', { name: '加入自選' });
+  await expect(starBtn).toBeVisible();
+  await expect(starBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect(starBtn).toContainText('加入觀察');
+  await starBtn.click();
 
   // Item appears in watchlist
-  const watchItem = page.getByTestId('watchlist-item-2330');
-  await expect(watchItem).toBeVisible();
-  await expect(watchItem).toContainText('2330 台積電');
+  const watch2454 = page.getByTestId('watchlist-item-2454');
+  await expect(watch2454).toBeVisible();
+  await expect(watch2454.getByRole('button', { name: '2454 聯發科', exact: true })).toBeVisible();
 
-  // Button turns into 已在自選 and is disabled
-  await expect(page.getByRole('button', { name: '已在自選' })).toBeDisabled();
+  // Star turns into remove action and is pressed
+  const pressed = page.getByRole('button', { name: '從自選移除' });
+  await expect(pressed).toHaveAttribute('aria-pressed', 'true');
+  await expect(pressed).toContainText('已在觀察');
 
   // LocalStorage check
   const storageContent = await page.evaluate(() =>
-    localStorage.getItem('tw-stock-dashboard.watchlist.v1'),
+    localStorage.getItem('tw-stock-dashboard.watchlist.v2'),
   );
-  expect(JSON.parse(storageContent!)).toEqual([{ symbol: '2330', name: '台積電' }]);
+  expect(JSON.parse(storageContent!)).toEqual([
+    '2330',
+    '7883',
+    '00981A',
+    '0050',
+    '00878',
+    '2317',
+    '00919',
+    '2059',
+    '2454',
+  ]);
 });
 
 test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
@@ -122,14 +162,8 @@ test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
   // Prepopulate localStorage with 5 items
   await page.addInitScript(() => {
     localStorage.setItem(
-      'tw-stock-dashboard.watchlist.v1',
-      JSON.stringify([
-        { symbol: '2330', name: '台積電' },
-        { symbol: '2454', name: '聯發科' },
-        { symbol: '2308', name: '台達電' },
-        { symbol: '2317', name: '鴻海' },
-        { symbol: '2382', name: '廣達' },
-      ]),
+      'tw-stock-dashboard.watchlist.v2',
+      JSON.stringify(['2330', '2454', '2308', '2317', '2382']),
     );
   });
 
@@ -139,10 +173,11 @@ test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
   await expect(page.getByTestId('watchlist-item-2330')).toBeVisible();
   await expect(page.getByTestId('watchlist-item-2454')).toBeVisible();
 
-  // Ensure no quote or history request is made on reload
+  // Boot autofocus only requests the first item (2330); ensure no fan-out for the remaining 4 items
+  await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
   await page.waitForTimeout(500);
-  expect(quoteCount).toBe(0);
-  expect(historyCount).toBe(0);
+  expect(quoteCount).toBe(1);
+  expect(historyCount).toBe(2);
 });
 
 test('D: Focus switching between watchlist items', async ({ page }) => {
@@ -150,26 +185,17 @@ test('D: Focus switching between watchlist items', async ({ page }) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
   });
-  await page.route('**/api/v1/stocks/2330/history*', (route) => {
-    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
-  });
+  await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
   await page.route('**/api/v1/stocks/2454/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2454) });
   });
-  await page.route('**/api/v1/stocks/2454/history*', (route) => {
-    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2454')) });
-  });
+  await page.route('**/api/v1/stocks/2454/history*', historyRoute('2454'));
 
   await page.addInitScript(() => {
     localStorage.setItem(
-      'tw-stock-dashboard.watchlist.v1',
-      JSON.stringify([
-        { symbol: '2330', name: '台積電' },
-        { symbol: '2454', name: '聯發科' },
-      ]),
+      'tw-stock-dashboard.watchlist.v2',
+      JSON.stringify(['2330', '2454']),
     );
   });
 
@@ -183,8 +209,8 @@ test('D: Focus switching between watchlist items', async ({ page }) => {
   // Click 2454
   await page.getByTestId('watchlist-item-2454').click();
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2454 聯發科');
-  await expect(page.getByTestId('watchlist-item-2454')).toHaveAttribute('aria-current', 'true');
-  await expect(page.getByTestId('watchlist-item-2330')).not.toHaveAttribute('aria-current', 'true');
+  await expect(page.getByTestId('watchlist-item-2454').getByRole('button', { name: '2454 聯發科', exact: true })).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByTestId('watchlist-item-2330').getByRole('button', { name: '2330 台積電', exact: true })).not.toHaveAttribute('aria-current', 'true');
 });
 
 test('E: Remove active stock keeps quote and chart displayed', async ({ page }) => {
@@ -192,15 +218,12 @@ test('E: Remove active stock keeps quote and chart displayed', async ({ page }) 
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
   });
-  await page.route('**/api/v1/stocks/2330/history*', (route) => {
-    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
-  });
+  await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
 
   await page.addInitScript(() => {
     localStorage.setItem(
-      'tw-stock-dashboard.watchlist.v1',
-      JSON.stringify([{ symbol: '2330', name: '台積電' }]),
+      'tw-stock-dashboard.watchlist.v2',
+      JSON.stringify(['2330']),
     );
   });
 
@@ -223,16 +246,17 @@ test('E: Remove active stock keeps quote and chart displayed', async ({ page }) 
 
 test('F: >4 items list is scrollable and all items reachable', async ({ page }) => {
   const items = [
-    { symbol: '2330', name: '台積電' },
-    { symbol: '2454', name: '聯發科' },
-    { symbol: '2308', name: '台達電' },
-    { symbol: '2317', name: '鴻海' },
-    { symbol: '2382', name: '廣達' },
-    { symbol: '3008', name: '大立光' },
+    '2330',
+    '2454',
+    '2308',
+    '2317',
+    '2382',
+    '3008',
+    '2881',
+    '2002',
   ];
-
   await page.addInitScript((data) => {
-    localStorage.setItem('tw-stock-dashboard.watchlist.v1', JSON.stringify(data));
+    localStorage.setItem('tw-stock-dashboard.watchlist.v2', JSON.stringify(data));
   }, items);
 
   await page.goto('/');
@@ -246,8 +270,8 @@ test('F: >4 items list is scrollable and all items reachable', async ({ page }) 
   );
   expect(isScrollable).toBe(true);
 
-  // 6th item exists and can be scrolled into view
-  const lastItem = page.getByTestId('watchlist-item-3008');
+  // Last item exists and can be scrolled into view
+  const lastItem = page.getByTestId('watchlist-item-2002');
   await lastItem.scrollIntoViewIfNeeded();
   await expect(lastItem).toBeVisible();
 });
@@ -264,8 +288,8 @@ test('G: Invalid symbol cannot be added to watchlist', async ({ page }) => {
 
   await page.goto('/');
 
-  await page.getByPlaceholder('2330').fill('999999');
-  await page.getByRole('button', { name: '查詢' }).click();
+  await page.getByPlaceholder('請輸入股票代號').fill('999999');
+  await page.getByRole('button', { name: '搜尋' }).click();
 
   await expect(page.getByText('查無此股票代號')).toBeVisible();
   await expect(page.getByRole('button', { name: '加入自選' })).toHaveCount(0);

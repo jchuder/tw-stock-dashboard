@@ -3,9 +3,12 @@ import {
   addToWatchlist,
   loadWatchlist,
   removeFromWatchlist,
+  reorderWatchlist,
   saveWatchlist,
   WATCHLIST_STORAGE_KEY,
 } from './stock-watchlist.js';
+
+const DEFAULT_WATCHLIST = ['2330', '7883', '00981A', '0050', '00878', '2317', '00919', '2059'];
 
 function createMockStorage(): Storage {
   const store = new Map<string, string>();
@@ -37,48 +40,58 @@ describe('stock-watchlist model', () => {
     vi.restoreAllMocks();
   });
 
-  it('loads valid watchlist from localStorage', () => {
-    const data = [
-      { symbol: '2330', name: '台積電' },
-      { symbol: '2454', name: '聯發科' },
-    ];
+  it('loads valid symbol list from localStorage', () => {
+    const data = ['2330', '2454'];
     globalThis.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(data));
 
-    const loaded = loadWatchlist();
-    expect(loaded).toEqual(data);
+    expect(loadWatchlist()).toEqual(data);
   });
 
-  it('safely falls back to empty array on corrupted json or invalid schema', () => {
-    globalThis.localStorage.setItem(WATCHLIST_STORAGE_KEY, 'invalid json {');
-    expect(loadWatchlist()).toEqual([]);
+  it('seeds the agreed default symbols on first run', () => {
+    expect(loadWatchlist()).toEqual(DEFAULT_WATCHLIST);
+    expect(globalThis.localStorage.getItem(WATCHLIST_STORAGE_KEY)).toBe(JSON.stringify(DEFAULT_WATCHLIST));
+  });
 
+  it('does not migrate the legacy object-shaped storage key', () => {
     globalThis.localStorage.setItem(
-      WATCHLIST_STORAGE_KEY,
-      JSON.stringify([{ invalidField: 123 }]),
+      'tw-stock-dashboard.watchlist.v1',
+      JSON.stringify([{ symbol: '2330', name: '台積電' }]),
     );
+
+    expect(loadWatchlist()).toEqual(DEFAULT_WATCHLIST);
+  });
+
+  it('respects an explicitly cleared empty watchlist without reseeding', () => {
+    globalThis.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify([]));
+
     expect(loadWatchlist()).toEqual([]);
   });
 
-  it('adds item without duplicating existing symbol', () => {
-    const initial = [{ symbol: '2330', name: '台積電' }];
-    const added = addToWatchlist(initial, { symbol: '2454', name: '聯發科' });
-    expect(added).toHaveLength(2);
+  it('falls back to defaults on corrupted or invalid new-shape data', () => {
+    globalThis.localStorage.setItem(WATCHLIST_STORAGE_KEY, 'invalid json {');
+    expect(loadWatchlist()).toEqual(DEFAULT_WATCHLIST);
 
-    const duplicated = addToWatchlist(added, { symbol: '2330', name: '台積電' });
-    expect(duplicated).toHaveLength(2);
+    globalThis.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify([{ symbol: '2330' }]));
+    expect(loadWatchlist()).toEqual(DEFAULT_WATCHLIST);
   });
 
-  it('removes item by symbol', () => {
-    const initial = [
-      { symbol: '2330', name: '台積電' },
-      { symbol: '2454', name: '聯發科' },
-    ];
-    const removed = removeFromWatchlist(initial, '2330');
-    expect(removed).toEqual([{ symbol: '2454', name: '聯發科' }]);
+  it('adds a symbol without duplicating existing entries', () => {
+    const added = addToWatchlist(['2330'], '2454');
+    expect(added).toEqual(['2330', '2454']);
+    expect(addToWatchlist(added, '2330')).toEqual(added);
   });
 
-  it('saves items to localStorage immediately', () => {
-    const items = [{ symbol: '2330', name: '台積電' }];
+  it('removes a symbol', () => {
+    expect(removeFromWatchlist(['2330', '2454'], '2330')).toEqual(['2454']);
+  });
+
+  it('reorders a symbol to the requested index', () => {
+    expect(reorderWatchlist(['2330', '2454', '2881'], '2881', 0)).toEqual(['2881', '2330', '2454']);
+    expect(reorderWatchlist(['2330', '2454', '2881'], '2330', 2)).toEqual(['2454', '2881', '2330']);
+  });
+
+  it('saves symbols to localStorage immediately', () => {
+    const items = ['2330'];
     saveWatchlist(items);
     expect(globalThis.localStorage.getItem(WATCHLIST_STORAGE_KEY)).toBe(JSON.stringify(items));
   });

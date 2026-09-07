@@ -119,12 +119,22 @@ async function main() {
     }
 
     console.log('[Smoke] Querying stock 2330...');
-    await page.getByPlaceholder('2330').fill('2330');
-    await page.getByRole('button', { name: '查詢' }).click();
+    await page.getByPlaceholder('請輸入股票代號').fill('2330');
+    await page.getByRole('button', { name: '搜尋' }).click();
 
     console.log('[Smoke] Waiting for quote and chart...');
     await page.locator('text=2330 台積電').waitFor({ timeout: 15000 });
     await page.locator('[data-testid="stock-history-chart"]').waitFor({ timeout: 15000 });
+
+    // Default range is 當日 (1d): at least one history request carries
+    // range=1d, and the chart labels the 5-minute timeframe.
+    const defaultRangeHit = apiRequests.history.some(
+      (url) => new URL(url).searchParams.get('range') === '1d',
+    );
+    if (!defaultRangeHit) {
+      throw new Error('No default 1d history request detected');
+    }
+    await page.locator('text=5 分鐘 K').waitFor({ timeout: 15000 });
 
     if (apiRequests.quote.length === 0) {
       throw new Error('No network request detected for stock quote');

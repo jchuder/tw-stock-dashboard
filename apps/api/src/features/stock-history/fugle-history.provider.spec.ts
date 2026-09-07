@@ -42,7 +42,7 @@ describe('FugleHistoryProvider typed failures', () => {
     const result = await run();
 
     expect(result).toEqual(Either.right(EXPECTED_RESPONSE));
-    const [rawUrl] = fetchMock.mock.calls[0] as [string];
+    const [rawUrl] = fetchMock.mock.calls[0] as unknown as [string];
     const url = decodeURIComponent(rawUrl);
     expect(url).toContain('/historical/candles/2330?');
     expect(url).toContain('timeframe=D');
@@ -158,5 +158,59 @@ describe('FugleHistoryProvider typed failures', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('FugleHistoryDecodeError');
     }
+  });
+
+  it('requests timeframe 5 for completed-session 5m history', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(VALID_UPSTREAM), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(
+      Effect.either(new FugleHistoryProvider().getHistorical5m('2330', '2026-08-16', '2026-08-22')),
+    );
+
+    expect(Either.isRight(result)).toBe(true);
+    const [rawUrl] = fetchMock.mock.calls[0] as unknown as [string];
+    const url = decodeURIComponent(rawUrl);
+    expect(url).toContain('/historical/candles/2330?');
+    expect(url).toContain('timeframe=5');
+    expect(url).toContain('from=2026-08-16');
+  });
+
+  it('returns current-session intraday 5m candles without from/to', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({
+        symbol: '2330',
+        exchange: 'TWSE',
+        data: [
+          { date: '2026-08-06T09:05:00.000+08:00', open: 2, high: 2, low: 2, close: 2, volume: 20 },
+          { date: '2026-08-06T09:00:00.000+08:00', open: 1, high: 1, low: 1, close: 1, volume: 10 },
+        ],
+      }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(new FugleHistoryProvider().getIntraday5m('2330')));
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.candles.map((c) => c.date)).toEqual([
+        '2026-08-06T09:00:00.000+08:00',
+        '2026-08-06T09:05:00.000+08:00',
+      ]);
+    }
+    const [rawUrl] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(decodeURIComponent(rawUrl)).toContain('/intraday/candles/2330?');
+  });
+
+  it('degrades intraday 404 to an empty session instead of failing the range', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    okOnce({ message: 'not found' }, 404);
+
+    const result = await Effect.runPromise(Effect.either(new FugleHistoryProvider().getIntraday5m('2330')));
+
+    expect(result).toEqual(Either.right({ symbol: '2330', market: 'TWSE', candles: [] }));
   });
 });

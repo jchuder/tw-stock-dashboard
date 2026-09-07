@@ -5,8 +5,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Mock } from 'vitest';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteModule } from './stock-quote.module.js';
+import { CacheModule } from '../../libs/cache/cache.module.js';
 import { LoggerModule } from '../../libs/observability/logger.module.js';
-
+import { UniverseModule } from '../../libs/securities/universe.module.js';
+import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
+import { TPEX_DAILY_QUOTE_URL, TWSE_DAILY_QUOTE_URL } from './official-daily-quote.provider.js';
+function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
+  return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
+}
 // Trimmed Fugle intraday quote fixture (official example values for 2330,
 // plus raw-only fields that must never leak into our contract).
 const FUGLE_FIXTURE = {
@@ -26,9 +32,18 @@ const EXPECTED_QUOTE = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
+  tradeDate: null,
+  openPrice: null,
+  highPrice: null,
+  lowPrice: null,
+  tradeVolume: null,
+  tradeVolumeUnit: 'lot',
+  limitUpPrice: null,
+  limitDownPrice: null,
 };
 const GENERIC_FAILURE = {
   statusCode: 500,
@@ -37,8 +52,9 @@ const GENERIC_FAILURE = {
 };
 
 interface ExpectedSource {
-  provider: 'fugle' | 'twse-mis';
+  provider: 'fugle' | 'twse-mis' | 'twse-openapi' | 'tpex-openapi' | 'tpex-esb';
   fallbackUsed: boolean;
+  fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
   cacheHit: boolean;
   asOf: string | null;
 }
@@ -51,10 +67,16 @@ function expectQuoteBody(body: unknown, quote: Record<string, unknown>, source: 
   );
 }
 
+// Fresh Response per call: the provider fetches quote + ticker, and a
+// consumed body cannot be read twice.
 function mockFugle(status: number, body: unknown): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })),
+    vi.fn(async (input: unknown) => {
+      const universe = universeFixtureResponse(String(input));
+      if (universe) return universe;
+      return new Response(JSON.stringify(body), { status });
+    }),
   );
 }
 
@@ -62,15 +84,54 @@ const MIS_FIXTURE = {
   msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }],
 };
 
-// Route-aware upstream stub: Fugle and TWSE MIS get independent behaviors so
-// the fallback matrix can assert both the response and who was (not) called.
+const OFFICIAL_TWSE_FIXTURE = [
+  {
+    Date: '1150904',
+    Code: '2330',
+    Name: '台積電',
+    TradeVolume: '14102018',
+    OpeningPrice: '2415.00',
+    HighestPrice: '2415.00',
+    LowestPrice: '2390.00',
+    ClosingPrice: '2410.00',
+    Change: '20.0000',
+  },
+];
+
+const OFFICIAL_TPEX_FIXTURE = [
+  {
+    Date: '1150907',
+    SecuritiesCompanyCode: '006201',
+    CompanyName: '元大富櫃50',
+    TradingShares: '137950',
+    Open: '44.98',
+    High: '45.82',
+    Low: '44.98',
+    Close: '45.41',
+    Change: '+1.23',
+  },
+];
+
+// Route-aware upstream stub: Fugle, TWSE MIS, and official daily endpoints
+// keep independent behaviors so the fallback matrix can assert routing.
+// Responses are cloned per call: the Fugle provider fetches two endpoints and
+// the snapshot providers may serve multiple symbols from one payload.
 function mockUpstreams(fugle: Response | Error, mis: Response | Error | null) {
   const fetchMock = vi.fn(async (input: unknown) => {
-    const picked = String(input).includes('api.fugle.tw') ? fugle : mis;
+    const url = String(input);
+    const universe = universeFixtureResponse(url);
+    if (universe) return universe;
+    const picked = url.includes('api.fugle.tw')
+      ? fugle
+      : url.includes(TWSE_DAILY_QUOTE_URL)
+        ? jsonResponse(OFFICIAL_TWSE_FIXTURE)
+        : url.includes(TPEX_DAILY_QUOTE_URL)
+          ? jsonResponse(OFFICIAL_TPEX_FIXTURE)
+          : mis;
     if (picked === null || picked instanceof Error) {
       throw picked ?? new Error('unexpected upstream call');
     }
-    return picked;
+    return picked.clone();
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -88,7 +149,7 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [LoggerModule, StockQuoteModule],
+      imports: [LoggerModule, CacheModule, UniverseModule, StockQuoteModule],
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -109,7 +170,9 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
 
   it('decodes Fugle, normalizes, and returns the exact contract', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(FUGLE_FIXTURE), { status: 200 }));
+    const fetchMock = vi.fn(
+      serveUniverseFirst(async () => new Response(JSON.stringify(FUGLE_FIXTURE), { status: 200 })),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
@@ -121,21 +184,88 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       asOf: null,
     });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    // One Fugle round: intraday quote + ticker (universe bootstrap shares the stub).
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('api.fugle.tw'))).toHaveLength(2);
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/2330',
       { headers: { 'X-API-KEY': 'test-api-key' }, signal: expect.any(AbortSignal) },
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.fugle.tw/marketdata/v1.0/stock/intraday/ticker/2330',
+      { headers: { 'X-API-KEY': 'test-api-key' }, signal: expect.any(AbortSignal) },
+    );
   });
 
-  it('fails safe without leaking when FUGLE_API_KEY is missing', async () => {
-    const fetchMock = vi.fn();
+  it('uses the official daily snapshot when FUGLE_API_KEY is missing', async () => {
+    const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(
+      res.body,
+      {
+        ...EXPECTED_QUOTE,
+        price: 2410,
+        referencePrice: 2390,
+        change: 20,
+        changePercent: 0.84,
+        tradeDate: '2026-09-04',
+        openPrice: 2415,
+        highPrice: 2415,
+        lowPrice: 2390,
+        tradeVolume: 14102.018,
+        limitUpPrice: null,
+        limitDownPrice: null,
+      },
+      {
+        provider: 'twse-openapi',
+        fallbackUsed: true,
+        fallbackReason: 'config_missing',
+        cacheHit: false,
+        asOf: null,
+      },
+    );
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
+  });
+
+  it('uses the TPEx daily snapshot for TPEX quotes without a key', async () => {
+    const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/006201/quote').expect(200);
+
+    expect(res.body).toMatchObject({
+      symbol: '006201',
+      name: '元大富櫃50',
+      market: 'TPEX',
+      price: 45.41,
+      referencePrice: 44.18,
+      change: 1.23,
+      changePercent: 2.78,
+      tradeDate: '2026-09-07',
+      tradeVolume: 137.95,
+      tradeVolumeUnit: 'lot',
+      source: {
+        provider: 'tpex-openapi',
+        fallbackUsed: true,
+        fallbackReason: 'config_missing',
+        cacheHit: false,
+        asOf: null,
+      },
+    });
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, TPEX_DAILY_QUOTE_URL)).toBe(1);
+  });
+
+  it('fails safe without leaking when the official daily snapshot fails', async () => {
+    const fetchMock = vi.fn(serveUniverseFirst(async () => new Response('error', { status: 500 })));
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('fails safe without leaking on upstream non-2xx', async () => {
@@ -147,7 +277,7 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     expect(res.body).toEqual(GENERIC_FAILURE);
   });
 
-  it('returns HTTP 404 Not Found on Fugle 404 without calling MIS', async () => {
+  it('returns HTTP 404 Not Found from universe without calling any provider', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     const fetchMock = mockUpstreams(
       jsonResponse({ message: 'Resource Not Found' }, 404),
@@ -161,7 +291,7 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       message: 'Stock not found',
       error: 'Not Found',
     });
-    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(1);
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
@@ -176,13 +306,13 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
 
   it('maps TPEx exchange to TPEX market', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    mockFugle(200, { ...FUGLE_FIXTURE, symbol: '9999', exchange: 'TPEx' });
+    mockFugle(200, { ...FUGLE_FIXTURE, exchange: 'TPEx' });
 
-    const res = await request(app.getHttpServer()).get('/api/v1/stocks/9999/quote').expect(200);
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
     expectQuoteBody(
       res.body,
-      { ...EXPECTED_QUOTE, symbol: '9999', market: 'TPEX' },
+      { ...EXPECTED_QUOTE, market: 'TPEX' },
       { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null },
     );
   });
@@ -266,27 +396,19 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
-  it('does not call any upstream without FUGLE_API_KEY', async () => {
+  it('uses official daily data instead of Fugle or MIS when the key is missing', async () => {
     const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
+    await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
-    expect(res.body).toEqual(GENERIC_FAILURE);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
   });
 
-  it('returns generic 500 when both Fugle and MIS fail', async () => {
+  it('serves the second sequential GET from cache with one upstream round', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    mockUpstreams(jsonResponse({ message: 'rate limited' }, 429), jsonResponse({ message: 'down' }, 503));
-
-    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
-
-    expect(res.body).toEqual(GENERIC_FAILURE);
-  });
-
-  it('serves the second sequential GET from cache with one Fugle call', async () => {
-    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    const fetchMock = vi.fn(async () => jsonResponse(FUGLE_FIXTURE));
+    const fetchMock = vi.fn(serveUniverseFirst(async () => jsonResponse(FUGLE_FIXTURE)));
     vi.stubGlobal('fetch', fetchMock);
 
     const first = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
@@ -305,9 +427,12 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       asOf: null,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // One Fugle round: intraday quote + ticker. Universe bootstrap shares the
+    // stub, and the second GET re-resolves the universe but replays the quote.
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('api.fugle.tw'))).toHaveLength(2);
   });
-it('reports Fugle asOf from lastUpdated microseconds', async () => {
+
+  it('reports Fugle asOf from lastUpdated microseconds', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     mockFugle(200, { ...FUGLE_FIXTURE, lastUpdated: 1685338200000000 });
 
@@ -358,5 +483,183 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
     expect(res.headers['x-request-id']).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
+  });
+  it('normalizes enriched session fields from Quote and limit prices from Ticker', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(
+      serveUniverseFirst(async (input: unknown) => {
+        if (String(input).includes('/intraday/ticker/')) {
+        return jsonResponse({
+          symbol: '2330',
+          name: '台積電',
+          exchange: 'TWSE',
+          date: '2023-05-29',
+          previousClose: 566,
+          referencePrice: 566,
+          limitUpPrice: 622,
+          limitDownPrice: 510,
+        });
+      }
+      return jsonResponse({
+        ...FUGLE_FIXTURE,
+        date: '2023-05-29',
+        openPrice: 574,
+        highPrice: 574,
+        lowPrice: 564,
+        total: { tradeVolume: 54538 },
+      });
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(
+      res.body,
+      {
+        ...EXPECTED_QUOTE,
+        tradeDate: '2023-05-29',
+        openPrice: 574,
+        highPrice: 574,
+        lowPrice: 564,
+        tradeVolume: 54538,
+  tradeVolumeUnit: 'lot',
+        limitUpPrice: 622,
+        limitDownPrice: 510,
+      },
+      { provider: 'fugle', fallbackUsed: false, cacheHit: false, asOf: null },
+    );
+  });
+
+  it('falls back to MIS when the ticker fails transiently while the quote succeeds', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(
+      serveUniverseFirst(async (input: unknown) => {
+        if (String(input).includes('/intraday/ticker/')) {
+          return jsonResponse({ message: 'rate limited' }, 429);
+        }
+        if (String(input).includes('api.fugle.tw')) {
+          return jsonResponse(FUGLE_FIXTURE);
+        }
+        return jsonResponse(MIS_FIXTURE);
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(res.body, EXPECTED_QUOTE, {
+      provider: 'twse-mis',
+      fallbackUsed: true,
+      cacheHit: false,
+      asOf: null,
+    });
+  });
+
+  it('returns HTTP 404 on Fugle 404 for a universe-known symbol without calling MIS', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const universe = universeFixtureResponse(String(input));
+      if (universe) return universe;
+      if (String(input).includes('api.fugle.tw')) {
+        return new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 });
+      }
+      return jsonResponse(MIS_FIXTURE);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(404);
+
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+  it('serves ESB quotes from the TPEx snapshot without Fugle or MIS', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const universe = universeFixtureResponse(String(input));
+      if (universe) return universe;
+      if (String(input).includes('tpex_esb_latest_statistics')) {
+        return jsonResponse([
+          {
+            Date: '1150907',
+            Time: '160006',
+            SecuritiesCompanyCode: '7883',
+            CompanyName: '饗賓',
+            PreviousAveragePrice: '280',
+            Highest: '293',
+            Lowest: '281.5',
+            Average: '283.72',
+            LatestPrice: '290',
+            TransactionVolume: '66789',
+          },
+        ]);
+      }
+      throw new Error(`unexpected upstream call: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/7883/quote').expect(200);
+
+    expectQuoteBody(
+      res.body,
+      {
+        symbol: '7883',
+        name: '饗賓',
+        market: 'ESB',
+        price: 290,
+        referencePrice: 280,
+        referencePriceType: 'previous_average',
+        change: 10,
+        changePercent: 3.57,
+        tradeDate: '2026-09-07',
+        openPrice: null,
+        highPrice: 293,
+        lowPrice: 281.5,
+        tradeVolume: 66789,
+        tradeVolumeUnit: 'share',
+        limitUpPrice: null,
+        limitDownPrice: null,
+      },
+      { provider: 'tpex-esb', fallbackUsed: false, cacheHit: false, asOf: '2026-09-07T08:00:06.000Z' },
+    );
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+
+  it('does not fall back on Fugle 403', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = mockUpstreams(jsonResponse({ message: 'forbidden' }, 403), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
+
+    expect(res.body).toEqual(GENERIC_FAILURE);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+  it('returns per-symbol results from one bounded batch request', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,999999,2330' })
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0]).toMatchObject({
+      symbol: '2330',
+      quote: { symbol: '2330', market: 'TWSE' },
+      error: null,
+    });
+    expect(res.body.items[1]).toEqual({
+      symbol: '999999',
+      quote: null,
+      error: 'not_found',
+    });
+  });
+
+  it('rejects a missing batch symbol query before provider I/O', async () => {
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/quotes').expect(400);
+
+    expect(res.body).toMatchObject({
+      statusCode: 400,
+      message: 'symbols query is required',
+    });
   });
 });

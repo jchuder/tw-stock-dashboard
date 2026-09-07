@@ -6,6 +6,7 @@ playwright/.cache/
 .env
 .env.local
 *.tsbuildinfo
+.vitest/
 .DS_Store
 
 .idea/
