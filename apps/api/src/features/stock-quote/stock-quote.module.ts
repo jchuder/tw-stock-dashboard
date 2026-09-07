@@ -3,10 +3,11 @@ import { FugleQuoteProvider } from './fugle-quote.provider.js';
 import { StockQuoteController } from './stock-quote.controller.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteService } from './stock-quote.service.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 
 @Module({
   controllers: [StockQuoteController],
-  providers: [FugleQuoteProvider, TwseMisQuoteProvider, StockQuoteCache, StockQuoteService],
+  providers: [FugleQuoteProvider, TwseMisQuoteProvider, TpexEsbQuoteProvider, StockQuoteCache, StockQuoteService],
 })
 export class StockQuoteModule {}

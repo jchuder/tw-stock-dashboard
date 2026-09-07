@@ -6,7 +6,7 @@ import type { FugleQuoteError } from './fugle-quote.error.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { addSpanEvent } from '../../libs/observability/tracing.js';
-import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
+import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 
 // Single Effect runtime boundary for this slice. Expected failures translate
 // to the frozen generic 500 after logging safe fields; unexpected defects are
@@ -43,18 +43,23 @@ export class StockQuoteController {
   }
 }
 
-// Safe failure fields only: error tag, provider side, upstream status.
-// Never the API key, headers, bodies, or raw causes.
 function failedLog(
   symbol: string,
-  error: FugleQuoteError | TwseMisQuoteError | UniverseUnavailableError,
+  error: FugleQuoteError | TwseMisQuoteError | TpexEsbQuoteError | UniverseUnavailableError,
 ) {
   const status = 'status' in error && typeof error.status === 'number' ? error.status : undefined;
+  const provider = error._tag.startsWith('Fugle')
+    ? 'fugle'
+    : error._tag.startsWith('TpexEsb')
+      ? 'tpex-esb'
+      : error._tag === 'UniverseUnavailableError'
+        ? 'universe'
+        : 'twse-mis';
   return {
     event: 'market_data_quote_failed',
     operation: 'quote',
     symbol,
-    provider: error._tag.startsWith('Fugle') ? 'fugle' : error._tag === 'UniverseUnavailableError' ? 'universe' : 'twse-mis',
+    provider,
     error_type: error._tag,
     ...(status !== undefined ? { upstream_status: status } : {}),
   };

@@ -41,7 +41,7 @@ export interface HistoryControls {
   onRangeChange: (range: HistoryRange) => void;
   maVisibility: MaVisibility;
   onToggleMa: (key: keyof MaVisibility) => void;
-  isPublicDataMode?: boolean;
+  disableIntradayRanges?: boolean;
 }
 
 export function formatChartSourceText(source: StockHistoryResponse['source']): string {
@@ -66,7 +66,7 @@ export function StockHistoryFocus({
   onRangeChange,
   maVisibility,
   onToggleMa,
-  isPublicDataMode = false,
+  disableIntradayRanges = false,
 }: {
   symbol: string;
 } & HistoryControls): JSX.Element {
@@ -147,7 +147,7 @@ export function StockHistoryFocus({
           <div className="periods" role="group" aria-label="K 線期間">
             {HISTORY_RANGES.map((option) => {
               const isIntraday = isIntradayRange(option.value);
-              const isDisabled = isPublicDataMode && isIntraday;
+              const isDisabled = disableIntradayRanges && isIntraday;
               return (
                 <button
                   key={option.value}

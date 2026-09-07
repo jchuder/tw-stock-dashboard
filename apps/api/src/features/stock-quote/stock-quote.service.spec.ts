@@ -12,6 +12,7 @@ import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
 
@@ -50,7 +51,7 @@ type QuoteResult = Either.Either<
 >;
 
 interface ExpectedSource {
-  provider: 'fugle' | 'twse-mis';
+  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
   fallbackUsed: boolean;
   cacheHit: boolean;
   asOf: string | null;
@@ -74,6 +75,7 @@ function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
+    new TpexEsbQuoteProvider(),
     new StockQuoteCache(),
     fakeUniverse(),
     silentLogger(),
@@ -85,6 +87,7 @@ function service() {
 const KNOWN_SECURITIES: Record<string, Security> = {
   '2330': { symbol: '2330', name: '台積電', market: 'TWSE', type: 'stock' },
   '2454': { symbol: '2454', name: '聯發科', market: 'TWSE', type: 'stock' },
+  '7883': { symbol: '7883', name: '饗賓', market: 'ESB', type: 'stock' },
 };
 
 function fakeUniverse(): UniverseResolver {
@@ -399,6 +402,78 @@ describe('StockQuoteService ticker fallback policy', () => {
         expect(result.left.status).toBe(422);
       }
     }
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+});
+describe('StockQuoteService ESB routing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const ESB_ROW = {
+    Date: '1150907',
+    Time: '160006',
+    SecuritiesCompanyCode: '7883',
+    CompanyName: '饗賓',
+    PreviousAveragePrice: '280',
+    Highest: '293',
+    Lowest: '281.5',
+    Average: '283.72',
+    LatestPrice: '290',
+    TransactionVolume: '66789',
+  };
+
+  const ESB_QUOTE = {
+    symbol: '7883',
+    name: '饗賓',
+    market: 'ESB',
+    price: 290,
+    referencePrice: 280,
+    referencePriceType: 'previous_average',
+    change: 10,
+    changePercent: 3.57,
+    tradeDate: '2026-09-07',
+    openPrice: null,
+    highPrice: 293,
+    lowPrice: 281.5,
+    tradeVolume: 66789,
+    tradeVolumeUnit: 'share',
+    limitUpPrice: null,
+    limitDownPrice: null,
+  };
+
+  it('routes ESB symbols to the TPEx snapshot without touching Fugle or MIS', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      if (String(input).includes('tpex_esb_latest_statistics')) {
+        return new Response(JSON.stringify([ESB_ROW]), { status: 200 });
+      }
+      throw new Error(`unexpected upstream call: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('7883')));
+
+    expectRightQuote(
+      result,
+      ESB_QUOTE,
+      { provider: 'tpex-esb', fallbackUsed: false, cacheHit: false, asOf: '2026-09-07T08:00:06.000Z' },
+    );
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+
+  it('surfaces ESB snapshot failures without Fugle or MIS fallback', async () => {
+    const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await Effect.runPromise(Effect.either(service().getQuote('7883')));
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe('TpexEsbHttpError');
+    }
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 });

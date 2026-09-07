@@ -12,6 +12,8 @@ import { StockNotFoundError } from '../../libs/securities/universe.error.js';
 import { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
+import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 
 // Application seam: TTL cache in front of the Fugle primary / TWSE MIS
 // fallback workflow, and the single place that assembles source metadata.
@@ -27,19 +29,19 @@ export class StockQuoteService {
   constructor(
     @Inject(FugleQuoteProvider) private readonly fugleQuoteProvider: FugleQuoteProvider,
     @Inject(TwseMisQuoteProvider) private readonly twseMisQuoteProvider: TwseMisQuoteProvider,
+    @Inject(TpexEsbQuoteProvider) private readonly tpexEsbQuoteProvider: TpexEsbQuoteProvider,
     @Inject(StockQuoteCache) private readonly cache: StockQuoteCache,
     @Inject(UniverseResolver) private readonly universe: UniverseResolver,
     @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {}
   getQuote(symbol: string): Effect.Effect<
     StockQuoteResponse,
-    FugleQuoteError | TwseMisQuoteError | StockNotFoundError | UniverseUnavailableError
+    FugleQuoteError | TwseMisQuoteError | TpexEsbQuoteError | StockNotFoundError | UniverseUnavailableError
   > {
     return Effect.gen(this, function* () {
-      // Universe first: unknown symbols fail 404/503 here without touching
-      // quote providers, so "no quote" is never mistaken for "no security".
-      // (ESB routing lands in Phase 2; until then ESB flows through below.)
-      yield* this.universe.resolve(symbol);
+      // Universe first: unknown symbols fail 404/503 here, and the resolved
+      // market selects the provider — ESB never touches Fugle or MIS.
+      const security = yield* this.universe.resolve(symbol);
       const lookupTime = yield* Clock.currentTimeMillis;
       const hit = this.cache.get(symbol, lookupTime);
       if (hit) {
@@ -58,6 +60,16 @@ export class StockQuoteService {
           cache_hit: true,
         });
         return cached;
+      }
+      if (security.market === 'ESB') {
+        const esb = yield* this.tpexEsbQuoteProvider.getQuote(symbol);
+        const completed = {
+          ...esb,
+          provider: 'tpex-esb',
+          fallbackUsed: false,
+          fallbackReason: null,
+        } as const;
+        return yield* this.assemble(symbol, completed);
       }
       const completed = yield* this.fugleQuoteProvider.getQuote(symbol).pipe(
         Effect.map(
@@ -122,6 +134,21 @@ export class StockQuoteService {
           },
         ),
       );
+      return yield* this.assemble(symbol, completed);
+    });
+  }
+
+  // Shared response assembly: provenance stamping, TTL insertion, and the
+  // served log/span event. Providers stay focused on normalized quotes.
+  private assemble(
+    symbol: string,
+    completed: QuoteProviderResult & {
+      readonly provider: 'fugle' | 'twse-mis' | 'tpex-esb';
+      readonly fallbackUsed: boolean;
+      readonly fallbackReason: 'config_missing' | 'upstream_unavailable' | null;
+    },
+  ): Effect.Effect<StockQuoteResponse, never> {
+    return Effect.gen(this, function* () {
       // fetchedAt marks when the winning provider completed — consistent with
       // the TTL insertion instant, never the request start.
       const fetchedAt = yield* Clock.currentTimeMillis;

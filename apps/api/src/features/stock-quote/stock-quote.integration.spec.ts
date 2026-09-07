@@ -51,7 +51,7 @@ const GENERIC_FAILURE = {
 };
 
 interface ExpectedSource {
-  provider: 'fugle' | 'twse-mis';
+  provider: 'fugle' | 'twse-mis' | 'tpex-esb';
   fallbackUsed: boolean;
   fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
   cacheHit: boolean;
@@ -490,6 +490,57 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(404);
 
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+  });
+  it('serves ESB quotes from the TPEx snapshot without Fugle or MIS', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const universe = universeFixtureResponse(String(input));
+      if (universe) return universe;
+      if (String(input).includes('tpex_esb_latest_statistics')) {
+        return jsonResponse([
+          {
+            Date: '1150907',
+            Time: '160006',
+            SecuritiesCompanyCode: '7883',
+            CompanyName: '饗賓',
+            PreviousAveragePrice: '280',
+            Highest: '293',
+            Lowest: '281.5',
+            Average: '283.72',
+            LatestPrice: '290',
+            TransactionVolume: '66789',
+          },
+        ]);
+      }
+      throw new Error(`unexpected upstream call: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/7883/quote').expect(200);
+
+    expectQuoteBody(
+      res.body,
+      {
+        symbol: '7883',
+        name: '饗賓',
+        market: 'ESB',
+        price: 290,
+        referencePrice: 280,
+        referencePriceType: 'previous_average',
+        change: 10,
+        changePercent: 3.57,
+        tradeDate: '2026-09-07',
+        openPrice: null,
+        highPrice: 293,
+        lowPrice: 281.5,
+        tradeVolume: 66789,
+        tradeVolumeUnit: 'share',
+        limitUpPrice: null,
+        limitDownPrice: null,
+      },
+      { provider: 'tpex-esb', fallbackUsed: false, cacheHit: false, asOf: '2026-09-07T08:00:06.000Z' },
+    );
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 

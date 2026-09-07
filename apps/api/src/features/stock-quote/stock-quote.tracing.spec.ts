@@ -9,6 +9,7 @@ import { FugleQuoteProvider } from './fugle-quote.provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteController } from './stock-quote.controller.js';
 import { StockQuoteService } from './stock-quote.service.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 
 vi.mock('../../libs/observability/tracing.js', () => ({
@@ -24,6 +25,7 @@ function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
+    new TpexEsbQuoteProvider(),
     new StockQuoteCache(),
     fakeUniverse(),
     silentLogger(),
