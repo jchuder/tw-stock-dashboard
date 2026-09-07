@@ -27,6 +27,13 @@ export type Timeframe = Schema.Schema.Type<typeof TimeframeSchema>;
 export const VolumeUnitSchema = Schema.Literal('lot', 'share');
 export type VolumeUnit = Schema.Schema.Type<typeof VolumeUnitSchema>;
 
+export const StockHistorySourceSchema = Schema.Struct({
+  provider: Schema.Literal('fugle', 'twse', 'tpex'),
+  mode: Schema.Literal('intraday', 'eod'),
+  asOf: Schema.NullOr(Schema.String),
+});
+export type StockHistorySource = Schema.Schema.Type<typeof StockHistorySourceSchema>;
+
 export const StockHistoryResponseSchema = Schema.Struct({
   symbol: Schema.String,
   market: MarketSchema,
@@ -34,5 +41,6 @@ export const StockHistoryResponseSchema = Schema.Struct({
   timeframe: TimeframeSchema,
   volumeUnit: VolumeUnitSchema,
   candles: Schema.Array(CandleSchema),
+  source: Schema.optional(StockHistorySourceSchema),
 });
 export type StockHistoryResponse = Schema.Schema.Type<typeof StockHistoryResponseSchema>;

@@ -11,6 +11,7 @@ import './app.css';
 export interface QuoteProvenance {
   provider: 'fugle' | 'twse-mis';
   asOf: string | null;
+  fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
 }
 
 const PROVIDER_LABELS = {
@@ -49,7 +50,11 @@ export function App(): JSX.Element {
           <div className="top-meta">
             <div>
               <strong>資料來源：</strong>
-              {provenance === null ? '—' : PROVIDER_LABELS[provenance.provider]}
+              {provenance === null
+                ? '—'
+                : provenance.fallbackReason === 'config_missing'
+                  ? 'TWSE MIS（公開資料模式）'
+                  : PROVIDER_LABELS[provenance.provider]}
             </div>
             <div>
               最後更新：

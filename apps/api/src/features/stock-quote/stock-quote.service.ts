@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Clock, Effect } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
-import type { FugleConfigError, FugleQuoteError } from './fugle-quote.error.js';
+import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import type { QuoteProviderResult } from './quote-provider.js';
@@ -52,12 +52,24 @@ export class StockQuoteService {
         return cached;
       }
       const completed = yield* this.fugleQuoteProvider.getQuote(symbol).pipe(
-        Effect.map((result) => ({ ...result, provider: 'fugle', fallbackUsed: false }) as const),
+        Effect.map(
+          (result) =>
+            ({
+              ...result,
+              provider: 'fugle',
+              fallbackUsed: false,
+              fallbackReason: null,
+            }) as const,
+        ),
         Effect.catchAll(
           (
             error,
           ): Effect.Effect<
-            QuoteProviderResult & { readonly provider: 'twse-mis'; readonly fallbackUsed: true },
+            QuoteProviderResult & {
+              readonly provider: 'twse-mis';
+              readonly fallbackUsed: true;
+              readonly fallbackReason: 'config_missing' | 'upstream_unavailable';
+            },
             FugleQuoteError | TwseMisQuoteError | StockNotFoundError
           > => {
             if (error._tag === 'FugleHttpError' && error.status === 404) {
@@ -66,6 +78,10 @@ export class StockQuoteService {
             if (!isFugleFallbackEligible(error)) {
               return Effect.fail(error);
             }
+            const reasonType =
+              error._tag === 'FugleConfigError'
+                ? ('config_missing' as const)
+                : ('upstream_unavailable' as const);
             const fallback = fallbackReason(error);
             this.logger.warn({
               event: 'market_data_fallback',
@@ -73,6 +89,7 @@ export class StockQuoteService {
               symbol,
               from_provider: 'fugle',
               to_provider: 'twse-mis',
+              fallback_reason: reasonType,
               ...fallback,
             });
             addSpanEvent('market_data.fallback', {
@@ -80,12 +97,14 @@ export class StockQuoteService {
               'market_data.from_provider': 'fugle',
               'market_data.to_provider': 'twse-mis',
               'market_data.reason': fallback.reason,
+              'market_data.reason_type': reasonType,
               ...('upstream_status' in fallback ? { 'market_data.upstream_status': fallback.upstream_status } : {}),
             });
             return Effect.map(this.twseMisQuoteProvider.getQuote(symbol), (result) => ({
               ...result,
               provider: 'twse-mis',
               fallbackUsed: true,
+              fallbackReason: reasonType,
             }));
           },
         ),
@@ -98,6 +117,7 @@ export class StockQuoteService {
         source: {
           provider: completed.provider,
           fallbackUsed: completed.fallbackUsed,
+          fallbackReason: completed.fallbackReason,
           fetchedAt: new Date(fetchedAt).toISOString(),
           asOf: completed.asOf,
           cacheHit: false,
@@ -120,28 +140,29 @@ export class StockQuoteService {
 }
 
 // Feature-local eligibility: transient/provider failures (including timeout)
-// fall back, config and client errors do not. No generic policy engine.
-export function isFugleFallbackEligible(error: FugleQuoteError): error is Exclude<FugleQuoteError, FugleConfigError> {
+// and missing configuration fall back to TWSE MIS. Invalid key (401/403) or
+// client errors (404) do not fall back.
+export function isFugleFallbackEligible(error: FugleQuoteError): boolean {
   switch (error._tag) {
+    case 'FugleConfigError':
     case 'FugleNetworkError':
     case 'FugleTimeoutError':
     case 'FugleDecodeError':
       return true;
-    case 'FugleConfigError':
-      return false;
     case 'FugleHttpError':
       return error.status === 429 || (error.status >= 500 && error.status <= 599);
   }
 }
 
 type FallbackReason =
+  | { reason: 'config_missing' }
   | { reason: 'network' | 'timeout' | 'decode' }
   | { reason: 'http_429' | 'http_5xx'; upstream_status: number };
 
-// Low-cardinality reason for the fallback event. Only callable on eligible
-// failures — ineligible ones never reach the MIS branch above.
-function fallbackReason(error: Exclude<FugleQuoteError, FugleConfigError>): FallbackReason {
+function fallbackReason(error: FugleQuoteError): FallbackReason {
   switch (error._tag) {
+    case 'FugleConfigError':
+      return { reason: 'config_missing' };
     case 'FugleNetworkError':
       return { reason: 'network' };
     case 'FugleTimeoutError':

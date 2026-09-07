@@ -66,6 +66,7 @@ describe('stock quote trace events', () => {
       'market_data.from_provider': 'fugle',
       'market_data.to_provider': 'twse-mis',
       'market_data.reason': 'http_429',
+      'market_data.reason_type': 'upstream_unavailable',
       'market_data.upstream_status': 429,
     });
   });

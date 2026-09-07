@@ -29,6 +29,13 @@ function formatNullable(value: number | null): string {
   return value === null ? '—' : value.toLocaleString();
 }
 
+export interface QuoteResolvedInfo {
+  provider: 'fugle' | 'twse-mis';
+  asOf: string | null;
+  fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
+  fallbackUsed: boolean;
+}
+
 export function StockQuotePanel({
   requestedSymbol,
   searchSeq,
@@ -40,7 +47,7 @@ export function StockQuotePanel({
   searchSeq?: number;
   onQuoteResolved?: (
     stock: { symbol: string; name: string },
-    info: { provider: 'fugle' | 'twse-mis'; asOf: string | null },
+    info: QuoteResolvedInfo,
   ) => void;
   isInWatchlist?: boolean;
   onToggleWatchlist?: () => void;
@@ -63,7 +70,12 @@ export function StockQuotePanel({
     if (quote.isSuccess && quote.data && quote.data.symbol === requestedSymbol) {
       onQuoteResolved?.(
         { symbol: quote.data.symbol, name: quote.data.name },
-        { provider: quote.data.source.provider, asOf: quote.data.source.asOf },
+        {
+          provider: quote.data.source.provider,
+          asOf: quote.data.source.asOf,
+          fallbackReason: quote.data.source.fallbackReason,
+          fallbackUsed: quote.data.source.fallbackUsed,
+        },
       );
     }
   }, [quote.isSuccess, quote.data, requestedSymbol, onQuoteResolved]);
@@ -79,7 +91,9 @@ export function StockQuotePanel({
     const current = data.source.provider;
     const previous = previousProvider.current;
     if (previous === null && current === 'twse-mis' && data.source.fallbackUsed) {
-      toast(FALLBACK_TOAST, { duration: 5000 });
+      if (data.source.fallbackReason !== 'config_missing') {
+        toast(FALLBACK_TOAST, { duration: 5000 });
+      }
     } else if (previous === 'fugle' && current === 'twse-mis') {
       toast(FALLBACK_TOAST, { duration: 5000 });
     } else if (previous === 'twse-mis' && current === 'fugle') {

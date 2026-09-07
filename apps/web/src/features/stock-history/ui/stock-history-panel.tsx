@@ -41,6 +41,7 @@ export interface HistoryControls {
   onRangeChange: (range: HistoryRange) => void;
   maVisibility: MaVisibility;
   onToggleMa: (key: keyof MaVisibility) => void;
+  isPublicDataMode?: boolean;
 }
 
 // Focus-card section: MA legend, chart, then periods below the chart. Plain
@@ -52,6 +53,7 @@ export function StockHistoryFocus({
   onRangeChange,
   maVisibility,
   onToggleMa,
+  isPublicDataMode = false,
 }: {
   symbol: string;
 } & HistoryControls): JSX.Element {
@@ -94,26 +96,66 @@ export function StockHistoryFocus({
       )}
       {history.isSuccess && history.data.candles.length > 0 && (
         <>
-          <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            {TIMEFRAME_LABELS[history.data.timeframe]} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
-          </p>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              margin: 0,
+              fontSize: '0.8rem',
+              color: 'var(--text-muted)',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}
+          >
+            <span>
+              {TIMEFRAME_LABELS[history.data.timeframe]} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
+            </span>
+            {history.data.source && (
+              <span
+                data-testid="chart-source-badge"
+                style={{
+                  fontSize: '0.75rem',
+                  background: '#f0f2f1',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  color: '#4e5551',
+                }}
+              >
+                資料來源：
+                {history.data.source.provider === 'fugle'
+                  ? 'Fugle'
+                  : history.data.source.provider === 'twse'
+                    ? 'TWSE'
+                    : 'TPEx'}{' '}
+                {history.data.source.mode === 'intraday' ? '即時 5 分 K' : '官方盤後日 K'}
+              </span>
+            )}
+          </div>
           <StockHistoryChart
             candles={history.data.candles}
             timeframe={history.data.timeframe}
             maVisibility={maVisibility}
           />
           <div className="periods" role="group" aria-label="K 線期間">
-            {HISTORY_RANGES.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`period-btn${range === option.value ? ' active' : ''}`}
-                aria-pressed={range === option.value}
-                onClick={() => onRangeChange(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
+            {HISTORY_RANGES.map((option) => {
+              const isIntraday = isIntradayRange(option.value);
+              const isDisabled = isPublicDataMode && isIntraday;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={isDisabled}
+                  className={`period-btn${range === option.value ? ' active' : ''}`}
+                  aria-pressed={range === option.value}
+                  aria-disabled={isDisabled}
+                  title={isDisabled ? '5 分 K 需配置 Fugle API Key' : undefined}
+                  onClick={() => onRangeChange(option.value)}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </>
       )}

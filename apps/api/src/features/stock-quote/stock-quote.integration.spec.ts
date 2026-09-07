@@ -47,6 +47,7 @@ const GENERIC_FAILURE = {
 interface ExpectedSource {
   provider: 'fugle' | 'twse-mis';
   fallbackUsed: boolean;
+  fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
   cacheHit: boolean;
   asOf: string | null;
 }
@@ -145,14 +146,33 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     );
   });
 
-  it('fails safe without leaking when FUGLE_API_KEY is missing', async () => {
-    const fetchMock = vi.fn();
+  it('falls back to TWSE MIS when FUGLE_API_KEY is missing', async () => {
+    const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
+
+    expectQuoteBody(
+      res.body,
+      EXPECTED_QUOTE,
+      {
+        provider: 'twse-mis',
+        fallbackUsed: true,
+        fallbackReason: 'config_missing',
+        cacheHit: false,
+        asOf: null,
+      },
+    );
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
+  });
+
+  it('fails safe without leaking when FUGLE_API_KEY is missing and MIS also fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
     expect(res.body).toEqual(GENERIC_FAILURE);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('fails safe without leaking on upstream non-2xx', async () => {
@@ -283,13 +303,13 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
-  it('does not call any upstream without FUGLE_API_KEY', async () => {
+  it('does not call Fugle upstream when FUGLE_API_KEY is missing', async () => {
     const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
 
-    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
+    await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
-    expect(res.body).toEqual(GENERIC_FAILURE);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
 
   it('serves the second sequential GET from cache with one upstream round', async () => {

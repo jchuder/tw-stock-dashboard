@@ -91,6 +91,11 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
       timeframe: '1d',
       volumeUnit: 'share',
       candles: EXPECTED_CANDLES,
+      source: {
+        provider: 'fugle',
+        mode: 'eod',
+        asOf: '2026-08-06',
+      },
     });
   });
 
@@ -285,5 +290,52 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
       const to = Date.parse(url.match(/to=(\d{4}-\d{2}-\d{2})/)?.[1] ?? '');
       expect((to - from) / 86_400_000).toBeLessThan(365);
     }
+  });
+
+  it('rejects intraday range 1d with 400 when FUGLE_API_KEY is missing without calling upstream', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/history?range=1d').expect(400);
+
+    expect(res.body).toEqual({
+      statusCode: 400,
+      message: 'Intraday 5-minute candles require Fugle API Key',
+      error: 'Bad Request',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('serves daily history from TWSE official data when FUGLE_API_KEY is missing', async () => {
+    const twseData = {
+      stat: 'OK',
+      data: [
+        ['115/07/01', '10,000,000', '1,000,000', '1,000.00', '1,050.00', '990.00', '1,040.00', '+40.00', '1,000'],
+        ['115/08/06', '12,000,000', '1,200,000', '1,040.00', '1,060.00', '1,030.00', '1,050.00', '+10.00', '1,200'],
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('twse.com.tw')) {
+          return new Response(JSON.stringify(twseData), { status: 200 });
+        }
+        return new Response('Not Found', { status: 404 });
+      }),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/history?range=1m').expect(200);
+
+    expect(res.body.symbol).toBe('2330');
+    expect(res.body.market).toBe('TWSE');
+    expect(res.body.range).toBe('1m');
+    expect(res.body.timeframe).toBe('1d');
+    expect(res.body.source).toEqual({
+      provider: 'twse',
+      mode: 'eod',
+      asOf: '2026-08-06',
+    });
+    expect(res.body.candles.length).toBeGreaterThan(0);
   });
 });

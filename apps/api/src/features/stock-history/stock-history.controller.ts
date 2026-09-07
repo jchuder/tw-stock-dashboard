@@ -1,4 +1,12 @@
-import { BadRequestException, Controller, Get, Inject, InternalServerErrorException, Param, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Inject,
+  InternalServerErrorException,
+  Param,
+  Query,
+} from '@nestjs/common';
 import { Effect, Either, Schema } from 'effect';
 import type { HistoryRange, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
 import { HistoryRangeSchema } from '@tw-stock-dashboard/contracts';
@@ -22,6 +30,10 @@ export class StockHistoryController {
     const range: HistoryRange = parsedRange.right;
     const result = await Effect.runPromise(Effect.either(this.stockHistoryService.getHistory(symbol, range)));
     if (Either.isLeft(result)) {
+      const err = result.left;
+      if (err._tag === 'IntradayRangeUnavailableError') {
+        throw new BadRequestException('Intraday 5-minute candles require Fugle API Key');
+      }
       throw new InternalServerErrorException('Failed to fetch stock history');
     }
     return result.right;

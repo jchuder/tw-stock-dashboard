@@ -115,6 +115,7 @@ describe('stock quote domain logs', () => {
         symbol: '2330',
         from_provider: 'fugle',
         to_provider: 'twse-mis',
+        fallback_reason: 'upstream_unavailable',
         reason: 'http_429',
         upstream_status: 429,
       },

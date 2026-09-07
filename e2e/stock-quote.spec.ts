@@ -213,3 +213,86 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
   await expect(page.getByText('資料來源：TWSE MIS').first()).toBeVisible();
   await expect(page.getByText('最後更新：2026/09/04 13:35:00')).toBeVisible();
 });
+
+test('public data mode shows persistent banner, disables 5m candles, and updates source info', async ({ page }) => {
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...MIS_BODY,
+        source: {
+          provider: 'twse-mis',
+          fallbackUsed: true,
+          fallbackReason: 'config_missing',
+          fetchedAt: '2026-09-06T03:45:06.000Z',
+          asOf: '2026-09-04T05:30:00.000Z',
+          cacheHit: false,
+        },
+      }),
+    });
+  });
+
+  await page.route('**/api/v1/stocks/2330/history?range=1m', (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        symbol: '2330',
+        market: 'TWSE',
+        range: '1m',
+        timeframe: '1d',
+        volumeUnit: 'share',
+        source: {
+          provider: 'twse',
+          mode: 'eod',
+          asOf: '2026-09-04',
+        },
+        candles: [
+          {
+            date: '2026-09-04',
+            open: 560,
+            high: 570,
+            low: 559,
+            close: 568,
+            volume: 12345678,
+            ma5: 565,
+            ma10: null,
+            ma20: null,
+            ma60: null,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  // 1. Header displays TWSE MIS（公開資料模式）
+  await expect(page.getByText('資料來源：TWSE MIS（公開資料模式）').first()).toBeVisible();
+
+  // 2. Persistent amber banner is visible
+  const banner = page.getByTestId('public-data-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('公開資料模式');
+  await expect(banner).toContainText('報價來自 TWSE MIS，歷史 K 線來自交易所官方盤後日線');
+
+  // 3. Fallback toast should NOT be shown
+  await expect(page.getByText(FALLBACK_TOAST)).not.toBeVisible();
+
+  // 4. Intraday range buttons (當日, 3D, 5D) are disabled
+  const dayBtn = page.getByRole('button', { name: '當日' });
+  const threeDayBtn = page.getByRole('button', { name: '3D' });
+  const fiveDayBtn = page.getByRole('button', { name: '5D' });
+  await expect(dayBtn).toBeDisabled();
+  await expect(threeDayBtn).toBeDisabled();
+  await expect(fiveDayBtn).toBeDisabled();
+  await expect(dayBtn).toHaveAttribute('title', '5 分 K 需配置 Fugle API Key');
+
+  // 5. 1M range button is active by default in public data mode
+  const oneMonthBtn = page.getByRole('button', { name: '1M' });
+  await expect(oneMonthBtn).toHaveClass(/active/);
+
+  // 6. Chart source badge shows TWSE 官方盤後日 K
+  await expect(page.getByTestId('chart-source-badge')).toContainText('TWSE 官方盤後日 K');
+});
