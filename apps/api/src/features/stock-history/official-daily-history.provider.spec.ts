@@ -156,4 +156,71 @@ describe('OfficialDailyHistoryProvider', () => {
       expect(either.left._tag).toBe('StockHistoryNotFoundError');
     }
   });
+
+  it('resolves TWSE successfully even when TPEx returns HTTP 503 (cross-market probe isolation)', async () => {
+    const twseData = {
+      stat: 'OK',
+      data: [
+        ['115/08/06', '12,000,000', '1,200,000', '1,040.00', '1,060.00', '1,030.00', '1,050.00', '+10.00', '1,200'],
+      ],
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('twse.com.tw')) {
+          return new Response(JSON.stringify(twseData), { status: 200 });
+        }
+        if (url.includes('tpex.org.tw')) {
+          return new Response('Service Unavailable', { status: 503 });
+        }
+        return new Response('Not Found', { status: 404 });
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      provider.getDailyHistory('2330', '2026-08-01', '2026-08-06'),
+    );
+
+    expect(result.market).toBe('TWSE');
+    expect(result.provider).toBe('twse');
+    expect(result.candles).toHaveLength(1);
+  });
+
+  it('resolves TPEx successfully even when TWSE returns HTTP 503 (cross-market probe isolation)', async () => {
+    const tpexData = {
+      stat: 'ok',
+      tables: [
+        {
+          data: [
+            ['115/08/06', '2,000', '200,000', '102.00', '104.00', '101.00', '103.00', '+1.00', '600'],
+          ],
+        },
+      ],
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('twse.com.tw')) {
+          return new Response('Service Unavailable', { status: 503 });
+        }
+        if (url.includes('tpex.org.tw')) {
+          return new Response(JSON.stringify(tpexData), { status: 200 });
+        }
+        return new Response('Not Found', { status: 404 });
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      provider.getDailyHistory('6488', '2026-08-01', '2026-08-06'),
+    );
+
+    expect(result.market).toBe('TPEX');
+    expect(result.provider).toBe('tpex');
+    expect(result.candles).toHaveLength(1);
+    expect(result.candles[0].volume).toBe(2000000);
+  });
 });

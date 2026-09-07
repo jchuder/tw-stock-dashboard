@@ -47,9 +47,9 @@ flowchart TB
     end
 
     subgraph Upstream["外部市場資料源"]
-        Fugle["富果 Fugle Market API (Quote 主要來源 / History 唯一來源)"]
-        TWSE["台灣證券交易所 TWSE MIS / OpenAPI (Quote 備援 / TAIEX / 三大法人)"]
-        TPEx["證券櫃檯買賣中心 TPEx 開放資料 (OTC 櫃買指數)"]
+        Fugle["富果 Fugle Market API (Quote 主要來源 / History Enhanced 來源)"]
+        TWSE["台灣證券交易所 TWSE MIS / OpenAPI (Quote 備援 / 官方日線 / TAIEX / 三大法人)"]
+        TPEx["證券櫃檯買賣中心 TPEx 開放資料 (官方日線 / OTC 櫃買指數)"]
     end
 
     subgraph Telemetry["可觀測性系統"]
@@ -60,8 +60,8 @@ flowchart TB
     UI -. 遵循合約 .-> Types
     Nest -. 遵循合約 .-> Types
     EffectEngine --> Fugle
-    EffectEngine -- 故障自動降級備援 (限 Quote) --> TWSE
-    EffectEngine --> TPEx
+    EffectEngine -- 故障或無金鑰自動降級備援 (Quote / 日 K) --> TWSE
+    EffectEngine -- 故障或無金鑰自動降級備援 (日 K / 指數) --> TPEx
     Server -- OTLP gRPC/HTTP --> SigNoz
 ```
 
@@ -119,15 +119,15 @@ flowchart TB
 | 功能項目 | 資料來源 | 降級備援機制 | 快取策略 |
 | :--- | :--- | :--- | :--- |
 | 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（盤中行情與漲跌停 ground truth） | TWSE MIS（未配置金鑰或 upstream 異常自動平滑降級） | 5 秒 in-memory TTL 快取 |
-| 歷史 K 線（History） | 富果 Fugle MarketData API（提供 5 分 K 與日 K） | TWSE / TPEx 官方盤後日線（未配置金鑰或 5xx 降級，限日 K） | 不快取（無快取） |
+| 歷史 K 線（History） | 富果 Fugle MarketData API（提供 5 分 K 與日 K；Enhanced Mode 預設 1D） | TWSE / TPEx 官方盤後日線（未配置金鑰或 eligible transient failure 降級，限日 K；Public Data Mode 預設 1M） | 不快取（無快取） |
 | 加權指數（TAIEX） | TWSE MIS（單次批次抓取即時行情） | TWSE OpenAPI（日終盤後 EOD 數據平滑降級） | 30 秒動態輪詢，不快取 |
 | 櫃買指數（OTC） | TWSE MIS（單次批次抓取即時行情） | TPEx OpenAPI（日終盤後 EOD 數據平滑降級） | 30 秒動態輪詢，不快取 |
 | 三大法人買賣超 | TWSE BFI82U JSON endpoint（日終盤後 EOD 數據） | 無 | 不快取 |
 
 ### 重要說明
 
-1. **公開資料模式（Public Data Mode）**：若未配置 `FUGLE_API_KEY`，系統自動啟用公開資料模式。個股即時報價改由 TWSE MIS 提供，歷史走勢改由 TWSE 與 TPEx 官方公開日線提供，並在焦點個股頂部常駐顯示琥珀色揭露橫幅；因官方端點不提供盤中分 K，1D/3D/5D 按鈕將自動停用並提示需配置 Fugle API Key。
-2. **Enhanced Mode**：配置有效之 `FUGLE_API_KEY` 時，啟用富果盤中 5 分 K 與高頻即時報價完整功能。
+1. **公開資料模式（Public Data Mode）**：若未配置 `FUGLE_API_KEY`（或留空），系統自動啟用公開資料模式。個股即時報價改由 TWSE MIS 提供，歷史走勢改由 TWSE 與 TPEx 官方公開日線提供，預設進入 1M 日 K 視角，並在焦點個股頂部常駐顯示琥珀色揭露橫幅；因官方端點不提供盤中分 K，1D/3D/5D 按鈕將自動停用並提示需配置 Fugle API Key。
+2. **Enhanced Mode**：配置有效之 `FUGLE_API_KEY` 時啟用，預設提供盤中 1D（5 分 K）高頻即時行情與完整走勢。
 3. TWSE 與 TPEx 官方公開端點主要於交易日收盤後更新當日 EOD 數據，顯示最近一個有效交易日之收盤資訊。
 
 ## 安裝與快速啟動
@@ -150,13 +150,19 @@ pnpm install
 
 ### 開發伺服器啟動（一般本機模式）
 
-API 服務支援 Node 24 原生 `--env-file-if-exists=.env.local` 載入機制。複製範本檔案建立本機環境變數配置，填入金鑰後啟動（亦可透過 shell export 設定，外部環境變數優先權高於 `.env.local`）：
+API 服務支援 Node 24 原生 `--env-file-if-exists=.env.local` 載入機制。複製範本檔案建立本機環境變數配置：
 
 ```bash
 # 建立後端本機環境變數檔案
 cp .env.example apps/api/.env.local
-# 編輯 apps/api/.env.local 填入 FUGLE_API_KEY
+# FUGLE_API_KEY 可留空：
+# - 留空 = Public Data Mode（使用官方公開資料）
+# - 填寫有效金鑰 = Enhanced Mode（啟用 5 分 K 與富果即時行情）
 
+# 方式 A：透過 mise 一鍵本機啟動（前後端同時啟動，不啟動 Cloudflare）
+mise run local
+
+# 方式 B：手動分開終端機啟動
 # 終端機 1：啟動後端 API 伺服器 (http://localhost:3001)
 pnpm dev:api
 

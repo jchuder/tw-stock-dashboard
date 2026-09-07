@@ -148,15 +148,38 @@ export class OfficialDailyHistoryProvider {
     symbol: string,
     months: string[],
   ): Effect.Effect<'TWSE' | 'TPEX' | null, OfficialDailyHistoryError> {
+    // Bounded lookup policy: check up to the 3 most recent requested months to discover
+    // whether the symbol trades on TWSE or TPEx without exhausting upstream rate limits.
     const probeMonths = [...months].reverse().slice(0, 3);
     return Effect.gen(this, function* () {
+      let lastError: OfficialDailyHistoryError | null = null;
+
       for (const month of probeMonths) {
-        const [twseHas, tpexHas] = yield* Effect.all(
-          [this.checkTwseSymbol(symbol, month), this.checkTpexSymbol(symbol, month)],
+        const [twseOutcome, tpexOutcome] = yield* Effect.all(
+          [
+            Effect.either(this.checkTwseSymbol(symbol, month)),
+            Effect.either(this.checkTpexSymbol(symbol, month)),
+          ],
           { concurrency: 2 },
         );
-        if (twseHas) return 'TWSE';
-        if (tpexHas) return 'TPEX';
+
+        if (twseOutcome._tag === 'Right' && twseOutcome.right) {
+          return 'TWSE';
+        }
+        if (tpexOutcome._tag === 'Right' && tpexOutcome.right) {
+          return 'TPEX';
+        }
+
+        if (twseOutcome._tag === 'Left') {
+          lastError = twseOutcome.left;
+        }
+        if (tpexOutcome._tag === 'Left') {
+          lastError = tpexOutcome.left;
+        }
+      }
+
+      if (lastError) {
+        return yield* Effect.fail(lastError);
       }
       return null;
     });
