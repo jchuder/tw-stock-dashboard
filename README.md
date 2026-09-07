@@ -10,7 +10,7 @@ A production-minded Taiwan stock dashboard demo built with NestJS, Effect and Re
 2. 個股報價（Stock Quote）：呈現焦點個股資訊（例如 `2330 台積電 [上市] [★ 已在觀察]`），以明確文字呈現相較前一交易日的漲跌（現價與漲跌幅同步以紅/綠/持平著色），標註前一交易日收盤價與交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）；頂部 Header 即時顯示資料來源（Fugle API Connected 或 TWSE MIS 備援切換）與最後報價時間戳記，配置 5 秒 in-memory TTL 快取與異常降級備援提示。
 3. 技術線圖與均線（Stock History & Indicators）：支援當日/3D/5D（5 分鐘 K）與 1M/3M/6M/1Y（日 K），預設當日；MA5/MA10/MA20/MA60 以可點選虛線圖例切換（預設僅 MA5 顯示，右軸標示最新均線數值標籤），十字游標採用台北時間呈現，成交量直方圖單位自動對應（5 分 K 以張、日 K 以股計）；附帶最近 5 個交易日歷史交易明細表格，OHLC 欄位相對前一交易日收盤價以紅綠標示。
 4. 本機自選股（Local-First Watchlist）：免登入即可將關注個股加入自選清單，資料持久化於瀏覽器 LocalStorage；首次啟動預設 seed 台積電（2330）並自動聚焦，使用者主動清空自選清單後不會再次強制 re-seed，支援一鍵點擊切換分析焦點與移除。
-5. 頂部導航與響應設計（Header & Responsive UI）：頂部 Header 提供全域股票代號搜尋輸入框、目前焦點個股資料來源 badge 與最後更新時間戳記；版面採左側焦點分析欄（市場概況/報價/線圖/近期交易明細）加右側自選股清單欄，行動裝置依序垂直堆疊。
+5. 頂部導航與響應設計（Header & Responsive UI）：頂部 Header 提供全域股票代號搜尋輸入框、目前焦點個股的資料來源與最後更新時間；版面採左側焦點分析欄（市場概況/報價/線圖/近期交易明細）加右側自選股清單欄，行動裝置依序垂直堆疊。
 
 ## 系統架構拓撲
 
@@ -87,16 +87,14 @@ flowchart TB
         end
 
         Upstream["外部市場資料源 (Fugle / TWSE / TPEx)"]
-        SigNoz["SigNoz OTel Collector"]
+        SigNoz["SigNoz OTel Collector (選填)"]
     end
 
-    Visitor -- HTTPS 存取 --> CF
-    CF -- 本機通道轉發 --> ViteHost
-    ViteApp -- 傳送網頁資源 --> Visitor
-    Visitor -- 相對路徑 API 呼叫 (/api/v1/...) --> ViteProxy
-    ViteProxy -- 本地內部反向代理 --> NestHost
+    Visitor <-->|HTTPS 存取 / 網頁與 API 流量| CF
+    CF <-->|本機通道雙向轉發| ViteHost
+    ViteHost -- 相對路徑 API (/api/v1/...) 反向代理 --> NestHost
     API --> Upstream
-    API -. OTLP 遙測數據 .-> SigNoz
+    API -. OTLP 遙測數據 (若配置) .-> SigNoz
 ```
 
 > **安全與邊界說明**：Quick Tunnel 僅供短期 Demo 分享使用；第三方 API 金鑰（`FUGLE_API_KEY`）僅保留於後端本機，外部訪客瀏覽器透過同源相對路徑（`/api` 與 `/health`）由 Vite 內建反向代理安全轉送至 NestJS，避免外部請求直連訪客本機。
@@ -186,7 +184,7 @@ mise run demo
    - 後端 API：`pnpm --filter @tw-stock-dashboard/api start:otel`（監聽 Port 3001，保留完整 OpenTelemetry 遙測）
    - 前端 Web：`pnpm dev:web:tunnel`（以 `VITE_API_URL=""` 監聽 Port 5173，啟用相對路徑與 tunnel allowlist）
    - Cloudflare Quick Tunnel：`cloudflared tunnel --url http://localhost:5173`
-3. 終端機會在 `[demo:tunnel]` 區塊印出 `https://xxxx.trycloudflare.com` 臨時公開網址，直接提供給測試者即可。亦可於另一終端機執行 `curl -s http://127.0.0.1:20242/metrics | grep -o 'https://[^"]*\.trycloudflare\.com'` 快速查詢目前網址。
+3. 終端機會在 `[demo:tunnel]` 區塊印出 `https://xxxx.trycloudflare.com` 臨時公開網址，直接提供給測試者即可。
 
 #### 使用限制與安全性說明
 - **臨時網址**：Quick Tunnel 隨機生成，每次重新啟動皆會變更。
@@ -230,7 +228,7 @@ pnpm --filter @tw-stock-dashboard/api start:otel
 
 1. 關聯追蹤（Correlation）：每個傳入的 HTTP 請求均由中介軟體自動分配唯一的 `request_id`，並與 OpenTelemetry `trace_id` 緊密關聯，輸出於每筆 JSON 日誌中。
 2. 機密脫敏（Redaction Policy）：日誌系統嚴格過濾機密資訊，`FUGLE_API_KEY`、授權標頭及連線憑證絕不輸出至終端機或傳送至遠端收集器。
-3. 外部 Demo 遙測覆蓋：執行 `mise run demo` 時，後端同樣透過 `start:otel` 啟動，外部訪客透過 Cloudflare Tunnel 觸發的所有 API 操作皆會完整輸出 OpenTelemetry Traces 與結構化日誌至 SigNoz。
+3. 外部 Demo 遙測覆蓋：執行 `mise run demo` 時，後端同樣以 `start:otel` 啟動；若已配置可用的 OTEL exporter / SigNoz collector，外部訪客透過 Cloudflare Tunnel 觸發的 API 操作同樣會產生並匯出 OpenTelemetry Traces 與結構化日誌。
 
 ## 架構決策與邊界防護（Architecture Invariants）
 
