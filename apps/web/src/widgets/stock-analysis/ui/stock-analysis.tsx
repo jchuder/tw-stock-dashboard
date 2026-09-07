@@ -1,18 +1,51 @@
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import type { HistoryRange, Market, StockQuoteProvider } from '@tw-stock-dashboard/contracts';
+import type { HistoryRange, Market, Security, StockQuoteBatchItem, StockQuoteProvider } from '@tw-stock-dashboard/contracts';
+import { fetchSecurities } from '../../../entities/security/index.js';
 import { StockHistoryFocus, StockHistoryTable } from '../../../features/stock-history/index.js';
 import type { MaVisibility } from '../../../features/stock-history/ui/stock-history-chart.js';
-import { StockQuotePanel } from '../../../features/stock-quote/index.js';
+import { fetchStockQuoteBatches, StockQuotePanel } from '../../../features/stock-quote/index.js';
 import type { QuoteResolvedInfo } from '../../../features/stock-quote/index.js';
 import {
   addToWatchlist,
   loadWatchlist,
   removeFromWatchlist,
+  reorderWatchlist,
   saveWatchlist,
   StockWatchlistPanel,
 } from '../../../features/stock-watchlist/index.js';
-import type { WatchlistItem } from '../../../features/stock-watchlist/index.js';
+import type { WatchlistDisplayItem } from '../../../features/stock-watchlist/index.js';
+
+export function indexWatchlistQuotes(
+  items: readonly StockQuoteBatchItem[],
+): Readonly<Record<string, StockQuoteBatchItem>> {
+  return Object.fromEntries(items.map((item) => [item.symbol, item]));
+}
+
+export function indexWatchlistSecurities(
+  items: readonly Security[],
+): Readonly<Record<string, Security>> {
+  return Object.fromEntries(items.map((item) => [item.symbol, item]));
+}
+
+export function buildWatchlistItems(
+  symbols: readonly string[],
+  securities: Readonly<Record<string, Security>>,
+): WatchlistDisplayItem[] {
+  return symbols.map((symbol) => {
+    const security = securities[symbol];
+    return {
+      symbol,
+      name: security?.name ?? '—',
+      market: security?.market ?? null,
+    };
+  });
+}
+
+export function hasRetryableWatchlistQuotes(items: readonly StockQuoteBatchItem[]): boolean {
+  return items.some((item) => item.error === 'failed' || item.error === 'unavailable');
+}
 
 // Stock analysis: left focus column (one focus card with quote, legend,
 export function StockAnalysis({
@@ -32,7 +65,30 @@ export function StockAnalysis({
     } | null,
   ) => void;
 }): JSX.Element {
-  const [watchlist, setWatchlist] = useState<WatchlistItem[]>(() => loadWatchlist());
+  const [watchlist, setWatchlist] = useState<string[]>(() => loadWatchlist());
+  const watchlistSymbols = watchlist;
+  const watchlistQuerySymbols = [...watchlistSymbols].sort();
+  const watchlistQuoteQuery = useQuery({
+    queryKey: ['watchlist-quotes', watchlistQuerySymbols],
+    queryFn: () => fetchStockQuoteBatches(watchlistSymbols),
+    enabled: watchlistSymbols.length > 0,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+    retry: false,
+  });
+  const watchlistQuoteItems = watchlistQuoteQuery.data?.items ?? [];
+  const watchlistQuotes = indexWatchlistQuotes(watchlistQuoteItems);
+  const watchlistHasRetryableError =
+    watchlistQuoteQuery.isError || hasRetryableWatchlistQuotes(watchlistQuoteItems);
+  const watchlistSecurityQuery = useQuery({
+    queryKey: ['watchlist-securities', watchlistQuerySymbols],
+    queryFn: () => fetchSecurities(watchlistSymbols),
+    enabled: watchlistSymbols.length > 0,
+    staleTime: 300_000,
+    retry: false,
+  });
+  const watchlistSecurities = indexWatchlistSecurities(watchlistSecurityQuery.data ?? []);
+  const watchlistItems = buildWatchlistItems(watchlistSymbols, watchlistSecurities);
   const [validatedStock, setValidatedStock] = useState<{ symbol: string; name: string } | null>(
     null,
   );
@@ -87,9 +143,15 @@ export function StockAnalysis({
 
   const onToggleCurrentWatchlist = (): void => {
     if (!validatedStock) return;
-    const next = watchlist.some((item) => item.symbol === validatedStock.symbol)
+    const next = watchlist.includes(validatedStock.symbol)
       ? removeFromWatchlist(watchlist, validatedStock.symbol)
-      : addToWatchlist(watchlist, validatedStock);
+      : addToWatchlist(watchlist, validatedStock.symbol);
+    setWatchlist(next);
+    saveWatchlist(next);
+  };
+
+  const onMoveWatchlistStock = (symbol: string, targetIndex: number): void => {
+    const next = reorderWatchlist(watchlist, symbol, targetIndex);
     setWatchlist(next);
     saveWatchlist(next);
   };
@@ -99,8 +161,7 @@ export function StockAnalysis({
   };
 
   const isCurrentInWatchlist =
-    validatedStock !== null && watchlist.some((item) => item.symbol === validatedStock.symbol);
-
+    validatedStock !== null && watchlist.includes(validatedStock.symbol);
   return (
     <div className="stock-analysis-layout">
       <div className="focus-column">
@@ -134,13 +195,18 @@ export function StockAnalysis({
 
         {validatedStock !== null && <StockHistoryTable symbol={validatedStock.symbol} range={range} />}
       </div>
-
       <aside className="watchlist-rail">
         <StockWatchlistPanel
-          items={watchlist}
+          items={watchlistItems}
+          quotes={watchlistQuotes}
+          isLoading={watchlistQuoteQuery.isPending}
+          isRefreshing={watchlistQuoteQuery.isFetching && !watchlistQuoteQuery.isPending}
+          isError={watchlistHasRetryableError}
+          onRetry={() => void watchlistQuoteQuery.refetch()}
           activeSymbol={validatedStock?.symbol ?? requestedSymbol}
           onSelectStock={onSelectWatchlistStock}
           onRemoveStock={onRemoveWatchlistStock}
+          onMoveStock={onMoveWatchlistStock}
         />
       </aside>
     </div>
