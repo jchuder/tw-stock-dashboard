@@ -7,10 +7,10 @@ A production-minded Taiwan stock dashboard demo built with NestJS, Effect and Re
 ## 功能特色
 
 1. 市場概況（Market Overview）：支援盤中即時行情與盤後結算展示。盤中輪詢視窗（08:55～13:35）由 TWSE MIS 批次取得加權指數（TAIEX）與櫃買指數（OTC）並標註「即時行情 · HH:mm:ss」，前端 React Query 於盤中啟動每 30 秒輪詢更新；收盤或非交易時段呈現「YYYY/MM/DD 收盤」並自動停止輪詢，若即時訊號不可用則平滑降級至 TWSE / TPEx OpenAPI 盤後資訊。上市三大法人（外資、投信、自營商）買賣超金額維持每日盤後結算統計，點位與漲跌幅嚴格遵循金融慣例著色（上漲紅/下跌綠/持平）。
-2. 個股報價（Stock Quote）：呈現焦點個股資訊（例如 `2330 台積電 [上市] [★ 已在觀察]`），以明確文字呈現相較前一交易日的漲跌（現價與漲跌幅同步以紅/綠/持平著色），標註前一交易日收盤價與交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）；頂部 Header 即時顯示資料來源（Fugle API 或 TWSE MIS 備援切換）與最後報價時間戳記，採用 5 秒 in-memory TTL 快取與異常降級備援提示。
+2. 個股報價（Stock Quote）：呈現焦點個股資訊（例如 `2330 台積電 [上市] [★ 已在觀察]`），以明確文字呈現相較前一交易日的漲跌（現價與漲跌幅同步以紅/綠/持平著色），標註前一交易日收盤價與交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）；頂部 Header 即時顯示資料來源（Fugle API、TWSE MIS 或 TPEx ESB，依市場與備援狀態切換）與最後報價時間戳記，採用 5 秒 in-memory TTL 快取與異常降級備援提示。
 3. 技術線圖與均線（Stock History & Indicators）：支援當日/3D/5D（5 分鐘 K）與 1M/3M/6M/1Y（日 K），預設當日；MA5/MA10/MA20/MA60 以可點選虛線圖例切換（預設僅 MA5 顯示，右軸標示最新均線數值標籤），十字游標採用台北時間呈現，成交量直方圖單位自動對應（5 分 K 以張、日 K 以股計）；附帶最近 5 個交易日歷史交易明細表格，OHLC 欄位相對前一交易日收盤價以紅綠標示。
 4. 本機自選股（Local-First Watchlist）：免登入即可將關注個股加入自選清單，資料持久化於瀏覽器 LocalStorage；首次啟動預設載入 8 檔自選股並自動聚焦第一檔，使用者主動清空自選清單後不會再次強制 re-seed，支援一鍵切換分析焦點與移除。
-5. 頂部導航與響應設計（Header & Responsive UI）：頂部 Header 提供全域股票代號搜尋輸入框、目前焦點個股的資料來源與最後更新時間；版面採左側焦點分析欄（市場概況/報價/線圖/近期交易明細）加右側自選股清單欄，行動裝置依序垂直堆疊。
+5. 頂部導覽與響應式設計（Header & Responsive UI）：頂部 Header 提供全域股票代號搜尋輸入框、目前焦點個股的資料來源與最後更新時間；版面採左側焦點分析欄（市場概況/報價/線圖/近期交易明細）加右側自選股清單欄，行動裝置依序垂直堆疊。
 
 ## 系統架構拓撲
 
@@ -110,25 +110,26 @@ flowchart TB
 2. Effect 負責業務邏輯與效果運算：
    - 將預期失敗建模於 typed error channel；刻意讓 defects 保持 defects。
    - 強健性機制：精確設定 3 秒超時控制（Timeout）與並行排程（Concurrency），專案不採用任何 upstream 重試（no retry）。
-   - 優雅降級備援（Fallback）：當 Fugle 遭遇暫時性網路中斷或服務異常時，自動將個股報價（Quote）平滑切換至 TWSE MIS 備援資料源。
+   - 優雅降級備援（Fallback）：TWSE/TPEX 個股在 Fugle 遭遇暫時性網路中斷或服務異常時，自動切換至 TWSE MIS；ESB 個股則直接使用 TPEx ESB 專用報價資料源。
 
 ## 市場資料來源與限制說明
 
 本專案整合台灣金融市場公開與第三方資料管道：
 
-| 功能項目 | 資料來源 | 降級備援機制 | 快取策略 |
+| 功能項目 | 主要資料來源 | 備援或市場專用來源 | 快取策略 |
 | :--- | :--- | :--- | :--- |
-| 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（盤中行情與漲跌停 ground truth） | TWSE MIS（未設定金鑰或 upstream 異常自動平滑降級） | 5 秒 in-memory TTL 快取 |
-| 歷史 K 線（History） | 富果 Fugle MarketData API（提供 5 分 K 與日 K；Enhanced Mode 預設 1D） | TWSE / TPEx 官方盤後日線（未設定金鑰或 eligible transient failure 降級，限日 K；Public Data Mode 預設 1M） | 不快取（無快取） |
+| 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（TWSE/TPEX 盤中行情與漲跌停 ground truth） | TWSE MIS（TWSE/TPEX 未設定金鑰或 upstream 異常）；TPEx ESB（ESB 專用報價；以前一交易日均價為漲跌比較基準） | 5 秒 in-memory TTL 快取 |
+| 歷史 K 線（History） | 富果 Fugle MarketData API（提供 5 分 K 與日 K；Enhanced Mode 預設 1D） | TWSE / TPEx 官方盤後日線（TWSE/TPEX 未設定金鑰或 Fugle 暫時性失敗時降級，限日 K；Public Data Mode 預設 1M） | 官方月資料：當月快取 5 分鐘，已結束月份快取 24 小時；Fugle 日 K 不快取 |
+| 興櫃歷史資料（ESB History） | TPEx 興櫃官方歷史資料（官方日均價） | 無 | 官方月資料：當月快取 5 分鐘，已結束月份快取 24 小時；average-basis |
 | 加權指數（TAIEX） | TWSE MIS（單次批次抓取即時行情） | TWSE OpenAPI（日終盤後 EOD 資料平滑降級） | 30 秒動態輪詢，不快取 |
 | 櫃買指數（OTC） | TWSE MIS（單次批次抓取即時行情） | TPEx OpenAPI（日終盤後 EOD 資料平滑降級） | 30 秒動態輪詢，不快取 |
 | 三大法人買賣超 | TWSE BFI82U JSON endpoint（日終盤後 EOD 資料） | 無 | 不快取 |
 
 ### 重要說明
 
-1. **公開資料模式（Public Data Mode）**：若未設定 `FUGLE_API_KEY`（或留空），系統自動啟用公開資料模式。個股即時報價改由 TWSE MIS 提供，歷史走勢改由 TWSE 與 TPEx 官方公開日線提供，預設進入 1M 日 K 視角，並在焦點個股頂部常駐顯示琥珀色揭露橫幅；因官方端點不提供盤中分 K，1D/3D/5D 按鈕將自動停用並提示需設定 Fugle API Key。
-2. **Enhanced Mode**：設定有效之 `FUGLE_API_KEY` 時啟用，預設提供盤中 1D（5 分 K）高頻即時行情與完整走勢。
-3. TWSE 與 TPEx 官方公開端點主要於交易日收盤後更新當日 EOD 資料，顯示最近一個有效交易日之收盤資訊。
+1. **公開資料模式（Public Data Mode）**：若未設定 `FUGLE_API_KEY`（或留空），系統自動啟用公開資料模式。TWSE/TPEX 個股即時報價改由 TWSE MIS 提供，歷史走勢改由 TWSE 與 TPEx 官方公開日線提供；ESB 個股則使用 TPEx 官方日均價資料。非 ESB 個股預設進入 1M 日 K 視角，並在焦點個股頂部常駐顯示琥珀色揭露橫幅；TWSE/TPEX 官方端點不提供盤中分 K，1D/3D/5D 按鈕將自動停用並提示需設定 Fugle API Key；ESB 的 1D/3D/5D 按鈕則提示目前僅提供官方日均價。
+2. **Enhanced Mode**：設定有效之 `FUGLE_API_KEY` 時啟用，TWSE/TPEX 個股預設提供盤中 1D（5 分 K）高頻即時行情與完整走勢；ESB 仍使用 TPEx 官方日均價歷史資料。
+3. TWSE、TPEx 與 TPEx ESB 官方公開端點主要於交易日收盤後更新當日資料；上市／上櫃顯示收盤資訊，興櫃顯示日均價。
 
 ## 安裝與快速啟動
 
@@ -195,7 +196,7 @@ mise run demo
 
 #### 使用限制與安全性說明
 - **臨時網址**：Quick Tunnel 隨機生成，每次重新啟動皆會變更。
-- **短期用途**：該網址為公開 Internet 入口，僅供短期面試或同仁試用展示，不設有 SLA，且不宜長期公開張貼以保護 Fugle API 調用額度。
+- **短期用途**：該網址為公開 Internet 入口，僅供短期面試或同仁試用展示，不設有 SLA，且不宜長期公開張貼以保護 Fugle API 呼叫額度。
 - **非正式部署**：本功能非正式生產環境部署；正式線上部署建議使用具名通道（Named Tunnel）、自訂網域或設定 Cloudflare Access 身分驗證。
 
 ### 建置與品質驗證指令
@@ -243,6 +244,6 @@ pnpm --filter @tw-stock-dashboard/api start:otel
 2. 跨應用零共享（Zero Cross-App Imports）：`apps/api` 與 `apps/web` 不得直接互相引用程式碼，所有資料結構與通訊合約均收斂於 `packages/contracts`。
 3. ESLint 邊界自動化驗證：透過 `eslint-plugin-boundaries` 與獨立邊界驗證腳本於 CI/CD 流程強制阻擋違規引用。
 4. 本機優先（Local-First）：使用者自選股清單完全儲存於本機瀏覽器端，具備零伺服器延遲、即時更新與隱私安全特性。
-5. 記憶體快取策略（In-Memory Caching）：個股即時報價採用 5 秒 in-memory TTL 快取，歷史 OHLCV 與市場概況不快取。
-6. 無資料庫與免登入（No DB / No Auth）：Demo 專注於即時行情工作流與前端視覺呈現，不增加非必要之資料庫與鑑權基礎建設負擔。
+5. 記憶體快取策略（In-Memory Caching）：個股即時報價採用 5 秒 in-memory TTL 快取；TWSE/TPEX/ESB 官方歷史月資料使用 Redis 快取，當月 5 分鐘、已結束月份 24 小時，快取鍵前綴為 `history:twse:*`、`history:tpex:*`、`history:esb:*`；Redis 未啟用或異常時採 fail-open，不影響正確性；市場概況不快取。
+6. 無資料庫與免登入（No DB / No Auth）：Demo 專注於即時行情工作流與前端視覺呈現，不增加非必要之資料庫與身分驗證／授權基礎建設負擔。
 7. Demo 通道防護邊界（Demo Tunnel Boundary）：Quick Tunnel 僅作為開發與展示之臨時入口；`FUGLE_API_KEY` 嚴格限制於後端處理，永不暴露至前端。Tunnel 僅單點暴露 Vite（Port 5173），所有 API 與健康檢查請求均透過同源反向代理轉發至本機 Nest API，且僅在 tunnel 模式下允許 `.trycloudflare.com` 存取。
