@@ -17,13 +17,15 @@ const QUOTE_BODY = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
   ...ENRICHED_QUOTE,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
+    fallbackReason: null,
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -40,14 +42,20 @@ function historyBody(range: string, price: number) {
     range,
     timeframe: intraday ? '5m' : '1d',
     volumeUnit: intraday ? 'lot' : 'share',
+    priceBasis: 'close',
+    source: {
+      provider: 'fugle',
+      mode: intraday ? 'intraday' : 'eod',
+      asOf: intraday ? null : '2026-08-06',
+    },
     candles: intraday
       ? [
-          { date: '2026-09-04T09:00:00.000+08:00', open: 551, high: 561, low: 541, close: 555, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
-          { date: '2026-09-04T09:05:00.000+08:00', open: 555, high: 566, low: 545, close: price, volume: 900, ma5: 555, ma10: null, ma20: null, ma60: null },
+          { date: '2026-09-04T09:00:00.000+08:00', open: 551, high: 561, low: 541, close: 555, average: null, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
+          { date: '2026-09-04T09:05:00.000+08:00', open: 555, high: 566, low: 545, close: price, average: null, volume: 900, ma5: 555, ma10: null, ma20: null, ma60: null },
         ]
       : [
-          { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, volume: 1000, ma5: null, ma10: null, ma20: null, ma60: null },
-          { date: '2026-08-06', open: 555, high: 566, low: 545, close: price, volume: 2000, ma5: 555, ma10: null, ma20: null, ma60: null },
+          { date: '2026-08-05', open: 551, high: 561, low: 541, close: 555, average: null, volume: 1000, ma5: null, ma10: null, ma20: null, ma60: null },
+          { date: '2026-08-06', open: 555, high: 566, low: 545, close: price, average: null, volume: 2000, ma5: 555, ma10: null, ma20: null, ma60: null },
         ],
   };
 }
@@ -162,7 +170,7 @@ test('all seven ranges refetch with the right range param', async ({ page }) => 
     await expect(page.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true');
     expect(historyRanges[historyRanges.length - 1]).toBe(value);
   }
-  await expect(page.getByText('日 K')).toBeVisible();
+  await expect(page.getByText('日 K · 成交量（股）')).toBeVisible();
 });
 
 test('history failure does not take down the quote', async ({ page }) => {

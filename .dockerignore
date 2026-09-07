@@ -1,0 +1,14 @@
+.git
+.gitignore
+.idea
+node_modules
+**/node_modules
+dist
+**/dist
+test-results
+playwright-report
+playwright/.cache
+.vitest
+.env
+.env.local
+.DS_Store

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
-import type { Candle, HistoryRange } from '@tw-stock-dashboard/contracts';
+import type { Candle, HistoryRange, PriceBasis, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
 import { fetchStockHistory } from '../api/stock-history.api.js';
 import { StockHistoryChart } from './stock-history-chart.js';
 import type { MaVisibility } from './stock-history-chart.js';
@@ -41,7 +41,57 @@ export interface HistoryControls {
   onRangeChange: (range: HistoryRange) => void;
   maVisibility: MaVisibility;
   onToggleMa: (key: keyof MaVisibility) => void;
+  disableIntradayRanges?: boolean;
+  intradayDisabledReason?: 'fugle-api-key' | 'esb-official-daily' | null;
 }
+
+export function formatChartSourceText(source: StockHistoryResponse['source']): string {
+  const providerLabel =
+    source.provider === 'fugle'
+      ? 'Fugle'
+      : source.provider === 'twse'
+        ? 'TWSE'
+        : source.provider === 'tpex-esb'
+          ? 'TPEx 興櫃'
+          : 'TPEx';
+  const modeLabel =
+    source.mode === 'intraday'
+      ? '即時 5 分 K'
+      : source.provider === 'fugle'
+        ? '盤後日 K'
+        : source.provider === 'tpex-esb'
+          ? '官方日均價'
+          : '官方盤後日 K';
+  const asOfText = source.asOf ? ` · 更新至 ${source.asOf.replace(/-/g, '/')}` : '';
+  return `${providerLabel} · ${modeLabel}${asOfText}`;
+}
+
+export function getHistoryTableHeaders(priceBasis: PriceBasis): readonly string[] {
+  return priceBasis === 'average'
+    ? ['日期', '最高價', '最低價', '平均價', '成交量（股）']
+    : ['日期', '開盤價', '收盤價', '最高價', '最低價', '成交量（股）'];
+}
+export function getHistoryDisplayLabels(
+  priceBasis: PriceBasis,
+  timeframe: StockHistoryResponse['timeframe'],
+): {
+  timeframeLabel: string;
+  movingAverageLabel: string;
+  periodsAriaLabel: string;
+} {
+  return priceBasis === 'average'
+    ? {
+        timeframeLabel: '每日',
+        movingAverageLabel: 'MA 依日均價計算',
+        periodsAriaLabel: '歷史期間',
+      }
+    : {
+        timeframeLabel: TIMEFRAME_LABELS[timeframe],
+        movingAverageLabel: 'MA 依目前 K 線週期計算',
+        periodsAriaLabel: 'K 線期間',
+      };
+}
+
 
 // Focus-card section: MA legend, chart, then periods below the chart. Plain
 // divs — the card wrapper lives in the StockAnalysis composition so quote,
@@ -52,6 +102,8 @@ export function StockHistoryFocus({
   onRangeChange,
   maVisibility,
   onToggleMa,
+  disableIntradayRanges = false,
+  intradayDisabledReason = 'fugle-api-key',
 }: {
   symbol: string;
 } & HistoryControls): JSX.Element {
@@ -60,6 +112,10 @@ export function StockHistoryFocus({
     queryFn: () => fetchStockHistory(symbol, range),
     retry: false,
   });
+  const displayLabels = history.data
+    ? getHistoryDisplayLabels(history.data.priceBasis, history.data.timeframe)
+    : null;
+
 
   return (
     <section aria-label="股價走勢" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -81,10 +137,18 @@ export function StockHistoryFocus({
             </button>
           );
         })}
+        {history.data?.priceBasis === 'average' && (
+          <span
+            data-testid="average-price-legend"
+            style={{ color: '#374151', fontSize: '0.75rem', fontWeight: 600 }}
+          >
+            平均價
+          </span>
+        )}
         <span className="chart-toggle-hint">點按左側圖例可切換顯示</span>
       </div>
       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0' }}>
-        MA 依目前 K 線週期計算
+        {displayLabels?.movingAverageLabel ?? 'MA 依目前 K 線週期計算'}
       </p>
 
       {history.isPending && <p style={{ color: 'var(--text-muted)' }}>歷史資料載入中…</p>}
@@ -94,26 +158,71 @@ export function StockHistoryFocus({
       )}
       {history.isSuccess && history.data.candles.length > 0 && (
         <>
-          <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            {TIMEFRAME_LABELS[history.data.timeframe]} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
-          </p>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              margin: 0,
+              fontSize: '0.8rem',
+              color: 'var(--text-muted)',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}
+          >
+            <span>
+              {displayLabels?.timeframeLabel ?? '日 K'} · {VOLUME_UNIT_LABELS[history.data.volumeUnit]}
+            </span>
+            {history.data.source && (
+              <span
+                data-testid="chart-source-badge"
+                style={{
+                  fontSize: '0.75rem',
+                  background: '#f0f2f1',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  color: '#4e5551',
+                }}
+              >
+                {formatChartSourceText(history.data.source)}
+              </span>
+            )}
+          </div>
           <StockHistoryChart
             candles={history.data.candles}
             timeframe={history.data.timeframe}
+            priceBasis={history.data.priceBasis}
             maVisibility={maVisibility}
           />
-          <div className="periods" role="group" aria-label="K 線期間">
-            {HISTORY_RANGES.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`period-btn${range === option.value ? ' active' : ''}`}
-                aria-pressed={range === option.value}
-                onClick={() => onRangeChange(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div
+            className="periods"
+            role="group"
+            aria-label={displayLabels?.periodsAriaLabel ?? 'K 線期間'}
+          >
+            {HISTORY_RANGES.map((option) => {
+              const isIntraday = isIntradayRange(option.value);
+              const isDisabled = disableIntradayRanges && isIntraday;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={isDisabled}
+                  className={`period-btn${range === option.value ? ' active' : ''}`}
+                  aria-pressed={range === option.value}
+                  aria-disabled={isDisabled}
+                  title={
+                    isDisabled
+                      ? intradayDisabledReason === 'esb-official-daily'
+                        ? '興櫃目前提供官方日均價資料'
+                        : '5 分 K 需設定 Fugle API Key'
+                      : undefined
+                  }
+                  onClick={() => onRangeChange(option.value)}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </>
       )}
@@ -121,10 +230,10 @@ export function StockHistoryFocus({
   );
 }
 
-function getPriceClass(value: number, prevClose: number | null): string | undefined {
-  if (prevClose === null) return undefined;
-  if (value > prevClose) return 'price-up';
-  if (value < prevClose) return 'price-down';
+function getPriceClass(value: number | null, prevPrice: number | null): string | undefined {
+  if (value === null || prevPrice === null) return undefined;
+  if (value > prevPrice) return 'price-up';
+  if (value < prevPrice) return 'price-down';
   return undefined;
 }
 
@@ -139,10 +248,12 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
     retry: false,
   });
 
+  const priceBasis = table.data?.priceBasis ?? 'close';
   const tableCandles: ReadonlyArray<Candle> | null = table.data?.candles ?? null;
   const rows = (tableCandles ?? []).map((candle, index, arr) => ({
     ...candle,
-    prevClose: index > 0 ? arr[index - 1].close : null,
+    prevPrice:
+      index > 0 ? (priceBasis === 'average' ? arr[index - 1].average : arr[index - 1].close) : null,
   }));
   const displayRows = rows.slice(-5).reverse();
 
@@ -160,22 +271,35 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
         <table data-testid="recent-trading-table">
           <thead>
             <tr>
-              <th>日期</th>
-              <th>開盤價</th>
-              <th>收盤價</th>
-              <th>最高價</th>
-              <th>最低價</th>
-              <th>成交量（股）</th>
+              {getHistoryTableHeaders(priceBasis).map((header) => (
+                <th key={header}>{header}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {displayRows.map((candle) => (
               <tr key={candle.date}>
                 <td>{candle.date}</td>
-                <td className={getPriceClass(candle.open, candle.prevClose)}>{candle.open.toLocaleString()}</td>
-                <td className={getPriceClass(candle.close, candle.prevClose)}>{candle.close.toLocaleString()}</td>
-                <td className={getPriceClass(candle.high, candle.prevClose)}>{candle.high.toLocaleString()}</td>
-                <td className={getPriceClass(candle.low, candle.prevClose)}>{candle.low.toLocaleString()}</td>
+                {priceBasis === 'average' ? (
+                  <>
+                    <td>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
+                    <td>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
+                    <td className={getPriceClass(candle.average, candle.prevPrice)}>
+                      {candle.average === null ? '—' : candle.average.toLocaleString()}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className={getPriceClass(candle.open, candle.prevPrice)}>
+                      {candle.open === null ? '—' : candle.open.toLocaleString()}
+                    </td>
+                    <td className={getPriceClass(candle.close, candle.prevPrice)}>
+                      {candle.close === null ? '—' : candle.close.toLocaleString()}
+                    </td>
+                    <td>{candle.high === null ? '—' : candle.high.toLocaleString()}</td>
+                    <td>{candle.low === null ? '—' : candle.low.toLocaleString()}</td>
+                  </>
+                )}
                 <td>{candle.volume.toLocaleString()}</td>
               </tr>
             ))}

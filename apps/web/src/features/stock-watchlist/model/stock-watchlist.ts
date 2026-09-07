@@ -1,14 +1,20 @@
 import { Either, Schema } from 'effect';
 
-export const WATCHLIST_STORAGE_KEY = 'tw-stock-dashboard.watchlist.v1';
+export const WATCHLIST_STORAGE_KEY = 'tw-stock-dashboard.watchlist.v2';
 
-export const WatchlistItemSchema = Schema.Struct({
-  symbol: Schema.String,
-  name: Schema.String,
-});
-export type WatchlistItem = Schema.Schema.Type<typeof WatchlistItemSchema>;
+export const WatchlistSchema = Schema.Array(Schema.String);
+export type Watchlist = string[];
 
-export const WatchlistSchema = Schema.Array(WatchlistItemSchema);
+const DEFAULT_WATCHLIST: readonly string[] = [
+  '2330',
+  '7883',
+  '00981A',
+  '0050',
+  '00878',
+  '2317',
+  '00919',
+  '2059',
+];
 
 function getStorage(): Storage | null {
   if (typeof window !== 'undefined' && window.localStorage) {
@@ -20,37 +26,37 @@ function getStorage(): Storage | null {
   return null;
 }
 
-const DEFAULT_WATCHLIST: ReadonlyArray<WatchlistItem> = [{ symbol: '2330', name: '台積電' }];
+function defaultWatchlist(): Watchlist {
+  return [...DEFAULT_WATCHLIST];
+}
 
-export function loadWatchlist(): WatchlistItem[] {
+export function loadWatchlist(): Watchlist {
   const storage = getStorage();
   if (!storage) {
     return [];
   }
   try {
     const raw = storage.getItem(WATCHLIST_STORAGE_KEY);
-    // First run (key absent): seed the default focus stock. An explicitly
-    // cleared list ([]) or an invalid payload keeps the existing recovery
-    // behavior and is never reseeded.
     if (raw === null) {
-      saveWatchlist(DEFAULT_WATCHLIST);
-      return [...DEFAULT_WATCHLIST];
+      const defaults = defaultWatchlist();
+      saveWatchlist(defaults);
+      return defaults;
     }
-    if (!raw) {
-      return [];
-    }
-    const json = JSON.parse(raw) as unknown;
-    const decoded = Schema.decodeUnknownEither(WatchlistSchema)(json);
+    const decoded = Schema.decodeUnknownEither(WatchlistSchema)(JSON.parse(raw) as unknown);
     if (Either.isRight(decoded)) {
       return [...decoded.right];
     }
-    return [];
+    const defaults = defaultWatchlist();
+    saveWatchlist(defaults);
+    return defaults;
   } catch {
-    return [];
+    const defaults = defaultWatchlist();
+    saveWatchlist(defaults);
+    return defaults;
   }
 }
 
-export function saveWatchlist(items: readonly WatchlistItem[]): void {
+export function saveWatchlist(items: readonly string[]): void {
   const storage = getStorage();
   if (!storage) {
     return;
@@ -62,19 +68,29 @@ export function saveWatchlist(items: readonly WatchlistItem[]): void {
   }
 }
 
-export function addToWatchlist(
-  current: readonly WatchlistItem[],
-  item: WatchlistItem,
-): WatchlistItem[] {
-  if (current.some((existing) => existing.symbol === item.symbol)) {
+export function addToWatchlist(current: readonly string[], symbol: string): string[] {
+  if (current.includes(symbol)) {
     return [...current];
   }
-  return [...current, item];
+  return [...current, symbol];
 }
 
-export function removeFromWatchlist(
-  current: readonly WatchlistItem[],
+export function removeFromWatchlist(current: readonly string[], symbol: string): string[] {
+  return current.filter((item) => item !== symbol);
+}
+
+export function reorderWatchlist(
+  current: readonly string[],
   symbol: string,
-): WatchlistItem[] {
-  return current.filter((item) => item.symbol !== symbol);
+  targetIndex: number,
+): string[] {
+  const currentIndex = current.indexOf(symbol);
+  if (currentIndex < 0 || current.length < 2) {
+    return [...current];
+  }
+  const next = [...current];
+  next.splice(currentIndex, 1);
+  const boundedIndex = Math.max(0, Math.min(targetIndex, next.length));
+  next.splice(boundedIndex, 0, symbol);
+  return next;
 }

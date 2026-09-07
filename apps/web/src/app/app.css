@@ -267,6 +267,38 @@ button {
   gap: 14px;
 }
 
+/* Persistent Amber Disclosure Banner */
+.public-data-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.public-data-banner-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  background-color: #f59e0b;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 11px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.public-data-banner-text {
+  flex: 1;
+}
+
 /* Focus quote card */
 .focus-card {
   padding: 18px 20px 0;
@@ -462,6 +494,12 @@ button {
   color: white;
 }
 
+.period-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+
 /* Keep the old range-button class working with the same look. */
 .btn-control {
   border: 0;
@@ -592,7 +630,7 @@ button {
   list-style: none;
   padding: 0 12px 10px;
   margin: 0;
-  max-height: 260px;
+  max-height: min(60vh, 620px);
   overflow-y: auto;
 }
 
@@ -600,21 +638,138 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
-  cursor: pointer;
+  gap: 10px;
+  padding: 0 8px 0 0;
   border-top: 1px solid #eff1f0;
   border-radius: 8px;
   transition: background-color 0.15s ease;
   font-size: 13px;
 }
 
-.watchlist-item:hover {
+.watchlist-drag-handle {
+  flex: 0 0 26px;
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.watchlist-drag-handle:active {
+  cursor: grabbing;
+}
+
+.watchlist-drag-handle:focus-visible,
+.watchlist-order-button:focus-visible {
+  outline: 2px solid #b7bdb9;
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.watchlist-item.is-dragging {
+  opacity: 0.55;
+}
+
+.watchlist-item-select {
+  display: flex;
+  flex: 1;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 0 10px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.watchlist-item-select:hover {
   background-color: #fafcfb;
 }
 
-.watchlist-item[aria-current="true"] {
+.watchlist-item-select:focus-visible {
+  outline: 2px solid #b7bdb9;
+  outline-offset: -2px;
+}
+
+.watchlist-item-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 68px;
+}
+
+.watchlist-item-identity > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.watchlist-item-market {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.watchlist-item-values {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.watchlist-price {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.watchlist-change {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.watchlist-item-status,
+.watchlist-refreshing {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.watchlist-item-select[aria-current='true'] {
   background-color: #e2e8f0;
   font-weight: 600;
+}
+
+.watchlist-order-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.watchlist-order-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.watchlist-order-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .btn-remove {

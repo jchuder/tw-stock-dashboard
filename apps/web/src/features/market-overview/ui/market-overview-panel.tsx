@@ -1,7 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import type { MarketIndexSnapshot } from '@tw-stock-dashboard/contracts';
-import { formatTaipeiDate } from '../../../shared/datetime/format-taipei.js';
+import {
+  formatTaipeiDate,
+  formatTaipeiTime,
+  getMarketOverviewRefetchInterval,
+} from '../../../shared/datetime/format-taipei.js';
 import { fetchMarketOverview } from '../api/market-overview.api.js';
 
 function formatIndexChange(change: number, percent: number): string {
@@ -34,12 +38,19 @@ function IndexCard({
     <article className="dashboard-card market-card" data-testid={`market-index-${title}`}>
       <div className="card-title">{title}</div>
       <div className={`big-number ${changeClass(snapshot.change)}`}>
-        {snapshot.close.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        {snapshot.value.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
       </div>
       <div className={`index-change ${changeClass(snapshot.change)}`}>
         {formatIndexChange(snapshot.change, snapshot.changePercent)}
       </div>
-      <div className="mini-meta">{formatTaipeiDate(snapshot.asOf)} 收盤</div>
+      <div className="mini-meta">
+        {snapshot.state === 'intraday' && snapshot.asOf
+          ? `即時行情 · ${formatTaipeiTime(snapshot.asOf)}`
+          : `${formatTaipeiDate(snapshot.tradeDate)} 收盤`}
+      </div>
     </article>
   );
 }
@@ -48,6 +59,7 @@ export function MarketOverviewPanel(): JSX.Element {
   const query = useQuery({
     queryKey: ['market-overview'],
     queryFn: fetchMarketOverview,
+    refetchInterval: () => getMarketOverviewRefetchInterval(),
     retry: false,
   });
 

@@ -7,8 +7,24 @@ vi.mock('../../../shared/api/base-url.js', () => ({
 }));
 
 const MOCK_OVERVIEW = {
-  taiex: { asOf: '2026-09-04', close: 46551.13, change: 693.47, changePercent: 1.51 },
-  otc: { asOf: '2026-09-04', close: 402.48, change: 7.23, changePercent: 1.83 },
+  taiex: {
+    value: 46551.13,
+    change: 693.47,
+    changePercent: 1.51,
+    state: 'closed' as const,
+    tradeDate: '2026-09-04',
+    asOf: null,
+    source: 'twse' as const,
+  },
+  otc: {
+    value: 402.48,
+    change: 7.23,
+    changePercent: 1.83,
+    state: 'closed' as const,
+    tradeDate: '2026-09-04',
+    asOf: null,
+    source: 'tpex' as const,
+  },
   institutional: {
     asOf: '2026-09-04',
     market: 'TWSE' as const,
