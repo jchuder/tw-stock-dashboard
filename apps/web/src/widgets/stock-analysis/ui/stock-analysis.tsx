@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import type { HistoryRange } from '@tw-stock-dashboard/contracts';
+import type { HistoryRange, Market, StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { StockHistoryFocus, StockHistoryTable } from '../../../features/stock-history/index.js';
 import type { MaVisibility } from '../../../features/stock-history/ui/stock-history-chart.js';
 import { StockQuotePanel } from '../../../features/stock-quote/index.js';
+import type { QuoteResolvedInfo } from '../../../features/stock-quote/index.js';
 import {
   addToWatchlist,
   loadWatchlist,
@@ -23,7 +24,13 @@ export function StockAnalysis({
   requestedSymbol: string | null;
   searchSeq: number;
   onSymbolSubmitted: (symbol: string) => void;
-  onProvenance?: (provenance: { provider: 'fugle' | 'twse-mis'; asOf: string | null } | null) => void;
+  onProvenance?: (
+    provenance: {
+      provider: StockQuoteProvider;
+      asOf: string | null;
+      fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
+    } | null,
+  ) => void;
 }): JSX.Element {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>(() => loadWatchlist());
   const [validatedStock, setValidatedStock] = useState<{ symbol: string; name: string } | null>(
@@ -48,15 +55,19 @@ export function StockAnalysis({
 
   const handleQuoteResolved = useCallback(
     (
-      stock: { symbol: string; name: string },
-      info: { provider: 'fugle' | 'twse-mis'; asOf: string | null },
+      stock: { symbol: string; name: string; market: Market },
+      info: QuoteResolvedInfo,
     ): void => {
       setValidatedStock((current) =>
         current?.symbol === stock.symbol && current.name === stock.name
           ? current
-          : stock,
+          : { symbol: stock.symbol, name: stock.name },
       );
-      onProvenance?.(info);
+      onProvenance?.({
+        provider: info.provider,
+        asOf: info.asOf,
+        fallbackReason: info.fallbackReason,
+      });
     },
     [onProvenance],
   );

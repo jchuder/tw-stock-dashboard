@@ -9,7 +9,8 @@ const EXPECTED_QUOTE = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
   tradeDate: null,
@@ -81,7 +82,8 @@ describe('TwseMisQuoteProvider typed failures', () => {
           name: '測試',
           market: 'TPEX',
           price: 100.1,
-          previousClose: 100,
+          referencePrice: 100,
+          referencePriceType: 'previous_close',
           change: 0.1,
           changePercent: 0.1,
           tradeDate: null,
@@ -241,5 +243,22 @@ describe('TwseMisQuoteProvider typed failures', () => {
       expect(result.left._tag).toBe('TwseMisTimeoutError');
     }
     expect(signal?.aborted).toBe(true);
+  });
+
+  it('successfully parses when msgArray contains dummy entries from unused exchange channels', async () => {
+    okOnce({
+      msgArray: [
+        TSE_ENTRY,
+        { tv: '-', s: '-', c: '', z: '-' },
+      ],
+    });
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.quote.symbol).toBe('2330');
+      expect(result.right.quote.name).toBe('台積電');
+    }
   });
 });

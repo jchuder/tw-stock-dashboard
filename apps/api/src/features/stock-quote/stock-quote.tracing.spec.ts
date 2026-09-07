@@ -1,13 +1,18 @@
 import { Effect, Either } from 'effect';
+import type { Security } from '@tw-stock-dashboard/contracts';
+import { StockNotFoundError } from '../../libs/securities/universe.error.js';
+import type { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CacheService } from '../../libs/cache/cache.service.js';
 import type { PinoLogger } from 'nestjs-pino';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import { OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteController } from './stock-quote.controller.js';
 import { StockQuoteService } from './stock-quote.service.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
-
 vi.mock('../../libs/observability/tracing.js', () => ({
   addSpanEvent: vi.fn(),
   setSpanAttributes: vi.fn(),
@@ -21,9 +26,27 @@ function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
+    new OfficialDailyQuoteProvider(new CacheService()),
+    new TpexEsbQuoteProvider(new CacheService()),
     new StockQuoteCache(),
+    fakeUniverse(),
     silentLogger(),
   );
+}
+
+const KNOWN_SECURITIES: Record<string, Security> = {
+  '2330': { symbol: '2330', name: '台積電', market: 'TWSE', type: 'stock' },
+};
+
+function fakeUniverse(): UniverseResolver {
+  return {
+    resolve: (symbol: string) => {
+      const found = KNOWN_SECURITIES[symbol];
+      return found ? Effect.succeed(found) : Effect.fail(new StockNotFoundError());
+    },
+    resolveMany: (symbols: string[]) =>
+      Effect.succeed(symbols.flatMap((symbol) => KNOWN_SECURITIES[symbol] ?? [])),
+  } as unknown as UniverseResolver;
 }
 
 const FUGLE_BODY = {
@@ -66,6 +89,7 @@ describe('stock quote trace events', () => {
       'market_data.from_provider': 'fugle',
       'market_data.to_provider': 'twse-mis',
       'market_data.reason': 'http_429',
+      'market_data.reason_type': 'upstream_unavailable',
       'market_data.upstream_status': 429,
     });
   });

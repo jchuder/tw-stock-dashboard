@@ -9,24 +9,25 @@ import { Schema } from 'effect';
 // optional so a pre-market `-` placeholder degrades to null, never 500.
 // tlong stays Unknown: it is runtime-observed, not formally contracted —
 // a malformed freshness marker degrades to asOf null, never fails the quote.
+export const TwseMisEntrySchema = Schema.Struct({
+  c: Schema.String,
+  n: Schema.String,
+  ex: Schema.Literal('tse', 'otc'),
+  z: Schema.String,
+  y: Schema.String,
+  d: Schema.optional(Schema.String),
+  o: Schema.optional(Schema.String),
+  h: Schema.optional(Schema.String),
+  l: Schema.optional(Schema.String),
+  v: Schema.optional(Schema.String),
+  u: Schema.optional(Schema.String),
+  w: Schema.optional(Schema.String),
+  tlong: Schema.optional(Schema.Unknown),
+});
+export type TwseMisEntry = Schema.Schema.Type<typeof TwseMisEntrySchema>;
+
 export const TwseMisQuoteSchema = Schema.Struct({
-  msgArray: Schema.Array(
-    Schema.Struct({
-      c: Schema.String,
-      n: Schema.String,
-      ex: Schema.Literal('tse', 'otc'),
-      z: Schema.String,
-      y: Schema.String,
-      d: Schema.optional(Schema.String),
-      o: Schema.optional(Schema.String),
-      h: Schema.optional(Schema.String),
-      l: Schema.optional(Schema.String),
-      v: Schema.optional(Schema.String),
-      u: Schema.optional(Schema.String),
-      w: Schema.optional(Schema.String),
-      tlong: Schema.optional(Schema.Unknown),
-    }),
-  ),
+  msgArray: Schema.Array(Schema.Unknown),
 });
 export type TwseMisQuote = Schema.Schema.Type<typeof TwseMisQuoteSchema>;
 

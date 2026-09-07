@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { JSX } from 'react';
+import type { StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { Toaster } from 'sonner';
 import { MarketOverviewPanel } from '../features/market-overview/index.js';
 import { GlobalStockSearch } from '../features/stock-quote/index.js';
@@ -9,14 +10,15 @@ import { formatTaipeiDateTime } from '../shared/datetime/format-taipei.js';
 import './app.css';
 
 export interface QuoteProvenance {
-  provider: 'fugle' | 'twse-mis';
+  provider: StockQuoteProvider;
   asOf: string | null;
+  fallbackReason?: 'config_missing' | 'upstream_unavailable' | null;
 }
 
-const PROVIDER_LABELS = {
+const PROVIDER_LABELS: Partial<Record<StockQuoteProvider, string>> = {
   fugle: 'Fugle API Connected',
   'twse-mis': 'TWSE MIS',
-} as const;
+};
 
 export function App(): JSX.Element {
   // Boot focus: the first watchlist item (seeded with 2330 on first run) is
@@ -49,7 +51,7 @@ export function App(): JSX.Element {
           <div className="top-meta">
             <div>
               <strong>資料來源：</strong>
-              {provenance === null ? '—' : PROVIDER_LABELS[provenance.provider]}
+              {provenance === null ? '—' : PROVIDER_LABELS[provenance.provider] ?? provenance.provider}
             </div>
             <div>
               最後更新：
