@@ -1,4 +1,7 @@
 import { Effect, Either } from 'effect';
+import type { Security } from '@tw-stock-dashboard/contracts';
+import { StockNotFoundError } from '../../libs/securities/universe.error.js';
+import type { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PinoLogger } from 'nestjs-pino';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
@@ -22,8 +25,24 @@ function service() {
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
     new StockQuoteCache(),
+    fakeUniverse(),
     silentLogger(),
   );
+}
+
+const KNOWN_SECURITIES: Record<string, Security> = {
+  '2330': { symbol: '2330', name: '台積電', market: 'TWSE', type: 'stock' },
+};
+
+function fakeUniverse(): UniverseResolver {
+  return {
+    resolve: (symbol: string) => {
+      const found = KNOWN_SECURITIES[symbol];
+      return found ? Effect.succeed(found) : Effect.fail(new StockNotFoundError());
+    },
+    resolveMany: (symbols: string[]) =>
+      Effect.succeed(symbols.flatMap((symbol) => KNOWN_SECURITIES[symbol] ?? [])),
+  } as unknown as UniverseResolver;
 }
 
 const FUGLE_BODY = {

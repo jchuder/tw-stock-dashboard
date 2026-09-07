@@ -3,9 +3,16 @@ import { Test } from '@nestjs/testing';
 import { PinoLogger } from 'nestjs-pino';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteModule } from './stock-quote.module.js';
+import { CacheModule } from '../../libs/cache/cache.module.js';
+import { LoggerModule } from '../../libs/observability/logger.module.js';
+import { UniverseModule } from '../../libs/securities/universe.module.js';
+import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
+
+function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
+  return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
+}
 
 interface CapturedLog {
   level: 'info' | 'warn' | 'error';
@@ -53,7 +60,7 @@ describe('stock quote domain logs', () => {
   beforeAll(async () => {
     captured = [];
     const moduleRef = await Test.createTestingModule({
-      imports: [LoggerModule, StockQuoteModule],
+      imports: [LoggerModule, CacheModule, UniverseModule, StockQuoteModule],
     })
       .overrideProvider(PinoLogger)
       .useValue(captureLogger(captured))
@@ -78,7 +85,7 @@ describe('stock quote domain logs', () => {
 
   it('logs one served event for a Fugle success', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(FUGLE_BODY)));
+    vi.stubGlobal('fetch', vi.fn(serveUniverseFirst(async () => jsonResponse(FUGLE_BODY))));
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
@@ -99,10 +106,12 @@ describe('stock quote domain logs', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: unknown) =>
-        String(input).includes('api.fugle.tw')
-          ? jsonResponse({ message: 'rate limited' }, 429)
-          : jsonResponse(MIS_BODY),
+      vi.fn(
+        serveUniverseFirst(async (input: unknown) =>
+          String(input).includes('api.fugle.tw')
+            ? jsonResponse({ message: 'rate limited' }, 429)
+            : jsonResponse(MIS_BODY),
+        ),
       ),
     );
 
@@ -136,10 +145,12 @@ describe('stock quote domain logs', () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: unknown) =>
-        String(input).includes('api.fugle.tw')
-          ? jsonResponse({ message: 'rate limited' }, 429)
-          : jsonResponse(MIS_BODY),
+      vi.fn(
+        serveUniverseFirst(async (input: unknown) =>
+          String(input).includes('api.fugle.tw')
+            ? jsonResponse({ message: 'rate limited' }, 429)
+            : jsonResponse(MIS_BODY),
+        ),
       ),
     );
 
@@ -169,7 +180,7 @@ describe('stock quote domain logs', () => {
 
   it('logs a failed event with safe fields on final 401', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ message: 'unauthorized' }, 401)));
+    vi.stubGlobal('fetch', vi.fn(serveUniverseFirst(async () => jsonResponse({ message: 'unauthorized' }, 401))));
 
     const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(500);
 
@@ -191,7 +202,7 @@ describe('stock quote domain logs', () => {
   });
 
   it('logs fallback event at info level when FUGLE_API_KEY is missing', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(MIS_BODY)));
+    vi.stubGlobal('fetch', vi.fn(serveUniverseFirst(async () => jsonResponse(MIS_BODY))));
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 

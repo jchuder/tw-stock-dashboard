@@ -4,8 +4,10 @@ import {
   Get,
   Inject,
   InternalServerErrorException,
+  NotFoundException,
   Param,
   Query,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Effect, Either, Schema } from 'effect';
 import type { HistoryRange, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
@@ -33,6 +35,12 @@ export class StockHistoryController {
       const err = result.left;
       if (err._tag === 'IntradayRangeUnavailableError') {
         throw new BadRequestException('Intraday 5-minute candles require Fugle API Key');
+      }
+      if (err._tag === 'StockNotFoundError' || err._tag === 'StockHistoryNotFoundError') {
+        throw new NotFoundException('Stock not found');
+      }
+      if (err._tag === 'UniverseUnavailableError') {
+        throw new ServiceUnavailableException('Security universe temporarily unavailable');
       }
       throw new InternalServerErrorException('Failed to fetch stock history');
     }

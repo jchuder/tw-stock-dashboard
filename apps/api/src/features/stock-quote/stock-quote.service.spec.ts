@@ -2,10 +2,12 @@ import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import type { PinoLogger } from 'nestjs-pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
-import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
+import type { Security, StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
-import type { StockNotFoundError } from './stock-not-found.error.js';
+import { StockNotFoundError } from '../../libs/securities/universe.error.js';
+import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
+import type { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
@@ -42,7 +44,10 @@ const EXPECTED_QUOTE = {
   limitDownPrice: null,
 };
 
-type QuoteResult = Either.Either<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError | StockNotFoundError>;
+type QuoteResult = Either.Either<
+  StockQuoteResponse,
+  FugleQuoteError | TwseMisQuoteError | StockNotFoundError | UniverseUnavailableError
+>;
 
 interface ExpectedSource {
   provider: 'fugle' | 'twse-mis';
@@ -70,8 +75,27 @@ function service() {
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
     new StockQuoteCache(),
+    fakeUniverse(),
     silentLogger(),
   );
+}
+
+// Universe-first short-circuit: known symbols resolve locally so provider
+// stubs only shape quote traffic; unknown symbols never reach upstream.
+const KNOWN_SECURITIES: Record<string, Security> = {
+  '2330': { symbol: '2330', name: '台積電', market: 'TWSE', type: 'stock' },
+  '2454': { symbol: '2454', name: '聯發科', market: 'TWSE', type: 'stock' },
+};
+
+function fakeUniverse(): UniverseResolver {
+  return {
+    resolve: (symbol: string) => {
+      const found = KNOWN_SECURITIES[symbol];
+      return found ? Effect.succeed(found) : Effect.fail(new StockNotFoundError());
+    },
+    resolveMany: (symbols: string[]) =>
+      Effect.succeed(symbols.flatMap((symbol) => KNOWN_SECURITIES[symbol] ?? [])),
+  } as unknown as UniverseResolver;
 }
 
 function callsTo(fetchMock: Mock, host: string): number {
@@ -295,7 +319,6 @@ describe('StockQuoteService TTL cache', () => {
         return [r1, r2] as const;
       }).pipe(Effect.provide(TestContext.TestContext)),
     );
-
     const misSource = { provider: 'twse-mis', fallbackUsed: true, cacheHit: false, asOf: null } as const;
     expectRightQuote(first, EXPECTED_QUOTE, misSource);
     expectRightQuote(second, EXPECTED_QUOTE, { ...misSource, cacheHit: true });
@@ -309,19 +332,9 @@ describe('StockQuoteService ticker fallback policy', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
-
-
-  it('reports StockNotFound without MIS when quote 404 races ticker 429', async () => {
+  it('reports StockNotFound from universe without calling any provider', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    const fetchMock = vi.fn(async (input: unknown) => {
-      if (String(input).includes('/intraday/quote/')) {
-        return new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 });
-      }
-      if (String(input).includes('api.fugle.tw')) {
-        return new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 });
-      }
-      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
-    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(MIS_BODY), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await Effect.runPromise(Effect.either(service().getQuote('999999')));
@@ -330,20 +343,16 @@ describe('StockQuoteService ticker fallback policy', () => {
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('StockNotFoundError');
     }
+    expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
-  it('fails with StockNotFoundError on ticker 404 without calling MIS provider', async () => {
+  it('fails with StockNotFoundError on Fugle 404 for a universe-known symbol without calling MIS', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    const fetchMock = vi.fn(async (input: unknown) => {
-      if (String(input).includes('api.fugle.tw')) {
-        return new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 });
-      }
-      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
-    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await Effect.runPromise(Effect.either(service().getQuote('999999')));
+    const result = await Effect.runPromise(Effect.either(service().getQuote('2330')));
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
@@ -390,26 +399,6 @@ describe('StockQuoteService ticker fallback policy', () => {
         expect(result.left.status).toBe(422);
       }
     }
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
-  });
-
-  it('fails with StockNotFoundError on Fugle 404 without calling MIS provider', async () => {
-    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
-    const fetchMock = vi.fn(async (input: unknown) => {
-      if (String(input).includes('api.fugle.tw')) {
-        return new Response(JSON.stringify({ message: 'Resource Not Found' }), { status: 404 });
-      }
-      return new Response(JSON.stringify(MIS_BODY), { status: 200 });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await Effect.runPromise(Effect.either(service().getQuote('999999')));
-
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left._tag).toBe('StockNotFoundError');
-    }
-    expect(callsTo(fetchMock, 'intraday/quote')).toBe(1);
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 });

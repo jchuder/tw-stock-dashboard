@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, InternalServerErrorException, NotFoundException, Param } from '@nestjs/common';
+import { Controller, Get, Inject, InternalServerErrorException, NotFoundException, Param, ServiceUnavailableException } from '@nestjs/common';
 import { Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
@@ -6,6 +6,7 @@ import type { FugleQuoteError } from './fugle-quote.error.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { addSpanEvent } from '../../libs/observability/tracing.js';
+import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 
 // Single Effect runtime boundary for this slice. Expected failures translate
 // to the frozen generic 500 after logging safe fields; unexpected defects are
@@ -24,6 +25,9 @@ export class StockQuoteController {
       if (result.left._tag === 'StockNotFoundError') {
         throw new NotFoundException('Stock not found');
       }
+      if (result.left._tag === 'UniverseUnavailableError') {
+        throw new ServiceUnavailableException('Security universe temporarily unavailable');
+      }
       const failure = failedLog(symbol, result.left);
       this.logger.error(failure);
       addSpanEvent('market_data.quote_failed', {
@@ -41,13 +45,16 @@ export class StockQuoteController {
 
 // Safe failure fields only: error tag, provider side, upstream status.
 // Never the API key, headers, bodies, or raw causes.
-function failedLog(symbol: string, error: FugleQuoteError | TwseMisQuoteError) {
+function failedLog(
+  symbol: string,
+  error: FugleQuoteError | TwseMisQuoteError | UniverseUnavailableError,
+) {
   const status = 'status' in error && typeof error.status === 'number' ? error.status : undefined;
   return {
     event: 'market_data_quote_failed',
     operation: 'quote',
     symbol,
-    provider: error._tag.startsWith('Fugle') ? 'fugle' : 'twse-mis',
+    provider: error._tag.startsWith('Fugle') ? 'fugle' : error._tag === 'UniverseUnavailableError' ? 'universe' : 'twse-mis',
     error_type: error._tag,
     ...(status !== undefined ? { upstream_status: status } : {}),
   };

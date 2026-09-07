@@ -7,10 +7,11 @@ import { FugleQuoteProvider } from './fugle-quote.provider.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
 import type { QuoteProviderResult } from './quote-provider.js';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
+import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
+import { StockNotFoundError } from '../../libs/securities/universe.error.js';
+import { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
-
-import { StockNotFoundError } from './stock-not-found.error.js';
 
 // Application seam: TTL cache in front of the Fugle primary / TWSE MIS
 // fallback workflow, and the single place that assembles source metadata.
@@ -27,11 +28,18 @@ export class StockQuoteService {
     @Inject(FugleQuoteProvider) private readonly fugleQuoteProvider: FugleQuoteProvider,
     @Inject(TwseMisQuoteProvider) private readonly twseMisQuoteProvider: TwseMisQuoteProvider,
     @Inject(StockQuoteCache) private readonly cache: StockQuoteCache,
+    @Inject(UniverseResolver) private readonly universe: UniverseResolver,
     @Inject(PinoLogger) private readonly logger: PinoLogger,
   ) {}
-
-  getQuote(symbol: string): Effect.Effect<StockQuoteResponse, FugleQuoteError | TwseMisQuoteError | StockNotFoundError> {
+  getQuote(symbol: string): Effect.Effect<
+    StockQuoteResponse,
+    FugleQuoteError | TwseMisQuoteError | StockNotFoundError | UniverseUnavailableError
+  > {
     return Effect.gen(this, function* () {
+      // Universe first: unknown symbols fail 404/503 here without touching
+      // quote providers, so "no quote" is never mistaken for "no security".
+      // (ESB routing lands in Phase 2; until then ESB flows through below.)
+      yield* this.universe.resolve(symbol);
       const lookupTime = yield* Clock.currentTimeMillis;
       const hit = this.cache.get(symbol, lookupTime);
       if (hit) {

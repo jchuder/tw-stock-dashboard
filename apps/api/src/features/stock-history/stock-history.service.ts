@@ -2,9 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Clock, Effect } from 'effect';
 import type { HistoryRange, StockHistoryResponse } from '@tw-stock-dashboard/contracts';
 import type { StockHistoryServiceError } from './fugle-history.error.js';
-import {
-  IntradayRangeUnavailableError,
-} from './fugle-history.error.js';
+import { IntradayRangeUnavailableError } from './fugle-history.error.js';
 import { FugleHistoryProvider } from './fugle-history.provider.js';
 import { OfficialDailyHistoryProvider } from './official-daily-history.provider.js';
 import {
@@ -19,6 +17,8 @@ import {
 } from './history-window.js';
 import { applyMovingAverages } from './moving-average.js';
 import type { BaseCandle } from './moving-average.js';
+import type { StockNotFoundError, UniverseUnavailableError } from '../../libs/securities/universe.error.js';
+import { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 
 function isFugleKeyPresent(): boolean {
   const key = process.env.FUGLE_API_KEY?.trim();
@@ -44,13 +44,28 @@ export class StockHistoryService {
   constructor(
     @Inject(FugleHistoryProvider) private readonly fugleHistoryProvider: FugleHistoryProvider,
     @Inject(OfficialDailyHistoryProvider) private readonly officialDailyHistoryProvider: OfficialDailyHistoryProvider,
+    @Inject(UniverseResolver) private readonly universe: UniverseResolver,
   ) {}
 
-  getHistory(symbol: string, range: HistoryRange): Effect.Effect<StockHistoryResponse, StockHistoryServiceError> {
-    if (isIntradayRange(range)) {
-      return this.getIntradayHistory(symbol, range);
+  getHistory(
+    symbol: string,
+    range: HistoryRange,
+  ): Effect.Effect<StockHistoryResponse, StockHistoryServiceError | StockNotFoundError | UniverseUnavailableError> {
+    // Local validation first: no network I/O for a range that can never be
+    // served. Universe resolution follows for 404/503 semantics.
+    if (isIntradayRange(range) && !isFugleKeyPresent()) {
+      return Effect.fail(new IntradayRangeUnavailableError());
     }
-    return this.getDailyHistory(symbol, range);
+    return Effect.gen(this, function* () {
+      // Universe next: unknown symbols fail 404/503 without probing monthly
+      // upstream endpoints. Market routing still uses the bounded
+      // TWSE/TPEX probe until Phase 3 hands routing to the resolver.
+      yield* this.universe.resolve(symbol);
+      if (isIntradayRange(range)) {
+        return yield* this.getIntradayHistory(symbol, range);
+      }
+      return yield* this.getDailyHistory(symbol, range);
+    });
   }
 
   private getIntradayHistory(
