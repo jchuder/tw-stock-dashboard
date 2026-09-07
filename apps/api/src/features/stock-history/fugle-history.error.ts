@@ -22,7 +22,9 @@ export class StockHistoryNotFoundError extends Data.TaggedError('StockHistoryNot
   readonly symbol: string;
 }> {}
 
-export class IntradayRangeUnavailableError extends Data.TaggedError('IntradayRangeUnavailableError') {}
+export class IntradayRangeUnavailableError extends Data.TaggedError('IntradayRangeUnavailableError')<{
+  readonly reason: 'fugle-api-key' | 'esb-official-daily';
+}> {}
 
 export type FugleHistoryError =
   | FugleHistoryConfigError

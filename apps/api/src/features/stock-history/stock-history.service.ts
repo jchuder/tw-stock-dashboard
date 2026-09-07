@@ -54,11 +54,14 @@ export class StockHistoryService {
     // Local validation first: no network I/O for a range that can never be
     // served. Universe resolution follows for 404/503 semantics.
     if (isIntradayRange(range) && !isFugleKeyPresent()) {
-      return Effect.fail(new IntradayRangeUnavailableError());
+      return Effect.fail(new IntradayRangeUnavailableError({ reason: 'fugle-api-key' }));
     }
     return Effect.gen(this, function* () {
       const security = yield* this.universe.resolve(symbol);
       if (isIntradayRange(range)) {
+        if (security.market === 'ESB') {
+          return yield* new IntradayRangeUnavailableError({ reason: 'esb-official-daily' });
+        }
         return yield* this.getIntradayHistory(symbol, range);
       }
       return yield* this.getDailyHistory(security, range);
@@ -71,7 +74,7 @@ export class StockHistoryService {
   ): Effect.Effect<StockHistoryResponse, StockHistoryServiceError> {
     const hasKey = isFugleKeyPresent();
     if (!hasKey) {
-      return Effect.fail(new IntradayRangeUnavailableError());
+      return Effect.fail(new IntradayRangeUnavailableError({ reason: 'fugle-api-key' }));
     }
 
     return Effect.gen(this, function* () {

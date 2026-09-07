@@ -411,6 +411,24 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
 
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('api.fugle.tw'))).toBe(false);
   });
+  it('rejects ESB intraday history even when Fugle is configured', async () => {
+    vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn(
+      serveUniverseFirst(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('api.fugle.tw')) {
+          throw new Error(`unexpected Fugle history call: ${url}`);
+        }
+        throw new Error(`unexpected upstream call: ${url}`);
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/7883/history?range=1d').expect(400);
+
+    expect(res.body.message).toBe('興櫃目前提供官方日均價資料，暫不提供 5 分 K');
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('api.fugle.tw'))).toBe(false);
+  });
 
   it('does NOT fallback to official provider when Fugle returns 400 bad request', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');

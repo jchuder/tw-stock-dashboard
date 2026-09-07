@@ -3,10 +3,7 @@ import { Duration, Effect } from 'effect';
 import type { Security } from '@tw-stock-dashboard/contracts';
 import { CacheService } from '../../libs/cache/cache.service.js';
 import type { BaseCandle } from './moving-average.js';
-import {
-  OfficialDailyHistoryError,
-  StockHistoryNotFoundError,
-} from './fugle-history.error.js';
+import { OfficialDailyHistoryError } from './fugle-history.error.js';
 import { enumerateMonths, taipeiToday } from './history-window.js';
 
 export const TWSE_STOCK_DAY_URL = 'https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY';
@@ -142,7 +139,7 @@ export class OfficialDailyHistoryProvider {
     security: Security,
     from: string,
     to: string,
-  ): Effect.Effect<OfficialDailyHistoryResult, OfficialDailyHistoryError | StockHistoryNotFoundError> {
+  ): Effect.Effect<OfficialDailyHistoryResult, OfficialDailyHistoryError> {
     const months = enumerateMonths(from, to);
     if (months.length === 0) {
       return Effect.fail(new OfficialDailyHistoryError({ cause: 'empty months' }));
@@ -159,14 +156,12 @@ export class OfficialDailyHistoryProvider {
           : (month: string) => this.fetchTpexMonth(security.symbol, month);
       const chunkResults = yield* Effect.all(months.map(fetchMonth), { concurrency: 3 });
       const merged = chunkResults.flat();
-      if (merged.length === 0) {
-        return yield* new StockHistoryNotFoundError({ symbol: security.symbol });
-      }
+      const candles = dedupeAndSort(merged);
       return {
         symbol: security.symbol,
         market: security.market,
         provider: security.market === 'TWSE' ? ('twse' as const) : ('tpex' as const),
-        candles: dedupeAndSort(merged),
+        candles,
       };
     });
   }
@@ -185,7 +180,9 @@ export class OfficialDailyHistoryProvider {
           throw new Error(`TWSE returned HTTP ${res.status}`);
         }
         const json = (await res.json()) as { stat?: string; data?: unknown };
-        if (json.stat !== 'OK' || !Array.isArray(json.data)) return [];
+        if (json.stat !== 'OK' || !Array.isArray(json.data)) {
+          throw new Error('TWSE returned an unexpected monthly response');
+        }
         return parseTwseRows(json.data);
       },
       catch: (cause) => new OfficialDailyHistoryError({ cause }),
@@ -214,7 +211,9 @@ export class OfficialDailyHistoryProvider {
         }
         const json = (await res.json()) as { stat?: string; tables?: Array<{ data?: unknown }> };
         const data = json.tables?.[0]?.data;
-        if (json.stat !== 'ok' || !Array.isArray(data)) return [];
+        if (json.stat !== 'ok' || !Array.isArray(data)) {
+          throw new Error('TPEx returned an unexpected monthly response');
+        }
         return parseTpexRows(data);
       },
       catch: (cause) => new OfficialDailyHistoryError({ cause }),

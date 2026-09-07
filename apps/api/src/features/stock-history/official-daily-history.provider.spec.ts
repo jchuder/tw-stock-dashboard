@@ -157,20 +157,54 @@ describe('OfficialDailyHistoryProvider', () => {
     }
   });
 
-  it('fails with StockHistoryNotFoundError when the resolved market has no rows', async () => {
+  it('returns an empty successful result when the resolved market has no rows', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ stat: 'OK', data: [] }), { status: 200 })),
     );
 
+    const result = await Effect.runPromise(
+      createProvider().getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06'),
+    );
+
+    expect(result.market).toBe('TWSE');
+    expect(result.candles).toEqual([]);
+  });
+
+  it('does not cache a TWSE response with an unexpected status', async () => {
+    const cache = makeCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ stat: 'ERROR', data: [] }), { status: 200 })),
+    );
+
     const either = await Effect.runPromise(
-      Effect.either(createProvider().getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06')),
+      Effect.either(createProvider(cache).getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06')),
     );
 
     expect(either._tag).toBe('Left');
     if (either._tag === 'Left') {
-      expect(either.left._tag).toBe('StockHistoryNotFoundError');
+      expect(either.left._tag).toBe('OfficialDailyHistoryError');
     }
+    expect(cache.setJson).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a TPEX response with an unexpected status', async () => {
+    const cache = makeCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ stat: 'error', tables: [{ data: [] }] }), { status: 200 })),
+    );
+
+    const either = await Effect.runPromise(
+      Effect.either(createProvider(cache).getDailyHistory(TPEX_SECURITY, '2026-08-01', '2026-08-06')),
+    );
+
+    expect(either._tag).toBe('Left');
+    if (either._tag === 'Left') {
+      expect(either.left._tag).toBe('OfficialDailyHistoryError');
+    }
+    expect(cache.setJson).not.toHaveBeenCalled();
   });
 
   it('serves a normalized monthly cache hit without calling upstream', async () => {

@@ -34,7 +34,11 @@ export class StockHistoryController {
     if (Either.isLeft(result)) {
       const err = result.left;
       if (err._tag === 'IntradayRangeUnavailableError') {
-        throw new BadRequestException('Intraday 5-minute candles require Fugle API Key');
+        const message =
+          err.reason === 'esb-official-daily'
+            ? '興櫃目前提供官方日均價資料，暫不提供 5 分 K'
+            : 'Intraday 5-minute candles require Fugle API Key';
+        throw new BadRequestException(message);
       }
       if (err._tag === 'StockNotFoundError' || err._tag === 'StockHistoryNotFoundError') {
         throw new NotFoundException('Stock not found');
