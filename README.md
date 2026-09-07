@@ -7,8 +7,8 @@ A production-minded Taiwan stock dashboard demo built with NestJS, Effect and Re
 ## 功能特色
 
 1. 市場概況（Market Overview）：支援盤中即時行情與盤後結算展示。盤中輪詢視窗（08:55～13:35）由 TWSE MIS 批次取得加權指數（TAIEX）與櫃買指數（OTC）並標註「即時行情 · HH:mm:ss」，前端 React Query 於盤中啟動每 30 秒輪詢更新；收盤或非交易時段呈現「YYYY/MM/DD 收盤」並自動停止輪詢，若即時訊號不可用則平滑降級至 TWSE / TPEx OpenAPI 盤後資訊。上市三大法人（外資、投信、自營商）買賣超金額維持每日盤後結算統計，點位與漲跌幅嚴格遵循金融慣例著色（上漲紅/下跌綠/持平）。
-2. 個股報價（Stock Quote）：呈現焦點個股資訊（例如 `2330 台積電 [上市] [★ 已在觀察]`），以明確文字呈現相較前一交易日的漲跌（現價與漲跌幅同步以紅/綠/持平著色），標註前一交易日收盤價與交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）；頂部 Header 即時顯示資料來源（Fugle API、TWSE MIS 或 TPEx ESB，依市場與備援狀態切換）與最後報價時間戳記，採用 5 秒 in-memory TTL 快取與異常降級備援提示。
-3. 技術線圖與均線（Stock History & Indicators）：支援當日/3D/5D（5 分鐘 K）與 1M/3M/6M/1Y（日 K），預設當日；MA5/MA10/MA20/MA60 以可點選虛線圖例切換（預設僅 MA5 顯示，右軸標示最新均線數值標籤），十字游標採用台北時間呈現，成交量直方圖單位自動對應（5 分 K 以張、日 K 以股計）；附帶最近 5 個交易日歷史交易明細表格，OHLC 欄位相對前一交易日收盤價以紅綠標示。
+2. 個股報價（Stock Quote）：呈現焦點個股資訊（例如 `2330 台積電 [上市] [★ 已在觀察]`）；TWSE/TPEX 個股以相較前一交易日收盤價的漲跌呈現現價與漲跌幅，並標註交易日行情六格（開盤/最高/最低/成交量（張）/漲停價/跌停價）；ESB 個股以前一交易日均價作為漲跌比較基準，成交量以股顯示，開盤價、漲停價與跌停價顯示為「—」；頂部 Header 即時顯示資料來源（Fugle API、TWSE MIS 或 TPEx ESB，依市場與備援狀態切換）與最後報價時間戳記，採用 5 秒 in-memory TTL 快取與異常降級備援提示。
+3. 技術線圖與均線（Stock History & Indicators）：TWSE/TPEX 支援當日/3D/5D（5 分鐘 K）與 1M/3M/6M/1Y（日 K），ESB 支援 1M/3M/6M/1Y 官方日均價線圖（average-basis），不提供盤中分 K；MA5/MA10/MA20/MA60 以可點選虛線圖例切換（預設僅 MA5 顯示，右軸標示最新均線數值標籤），十字游標採用台北時間呈現，成交量直方圖單位依市場與週期對應（TWSE/TPEX 5 分 K 以張、日 K 與 ESB 以股計）；附帶最近 5 個交易日歷史交易明細表格，TWSE/TPEX OHLC 欄位相對前一交易日收盤價以紅綠標示，ESB 依日均價呈現。
 4. 本機自選股（Local-First Watchlist）：免登入即可將關注個股加入自選清單，資料持久化於瀏覽器 LocalStorage；首次啟動預設載入 8 檔自選股並自動聚焦第一檔，使用者主動清空自選清單後不會再次強制 re-seed，支援一鍵切換分析焦點與移除。
 5. 頂部導覽與響應式設計（Header & Responsive UI）：頂部 Header 提供全域股票代號搜尋輸入框、目前焦點個股的資料來源與最後更新時間；版面採左側焦點分析欄（市場概況/報價/線圖/近期交易明細）加右側自選股清單欄，行動裝置依序垂直堆疊。
 
@@ -129,7 +129,7 @@ flowchart TB
 
 1. **公開資料模式（Public Data Mode）**：若未設定 `FUGLE_API_KEY`（或留空），系統自動啟用公開資料模式。TWSE/TPEX 個股即時報價改由 TWSE MIS 提供，歷史走勢改由 TWSE 與 TPEx 官方公開日線提供；ESB 個股則使用 TPEx 官方日均價資料。非 ESB 個股預設進入 1M 日 K 視角，並在焦點個股頂部常駐顯示琥珀色揭露橫幅；TWSE/TPEX 官方端點不提供盤中分 K，1D/3D/5D 按鈕將自動停用並提示需設定 Fugle API Key；ESB 的 1D/3D/5D 按鈕則提示目前僅提供官方日均價。
 2. **Enhanced Mode**：設定有效之 `FUGLE_API_KEY` 時啟用，TWSE/TPEX 個股預設提供盤中 1D（5 分 K）高頻即時行情與完整走勢；ESB 仍使用 TPEx 官方日均價歷史資料。
-3. TWSE、TPEx 與 TPEx ESB 官方公開端點主要於交易日收盤後更新當日資料；上市／上櫃顯示收盤資訊，興櫃顯示日均價。
+3. TWSE／TPEx／ESB 的官方歷史資料端點主要於交易日收盤後更新當日資料；上市／上櫃顯示收盤資訊，興櫃顯示日均價。ESB 即時報價另由 TPEx ESB latest-statistics snapshot 提供。
 
 ## 安裝與快速啟動
 
