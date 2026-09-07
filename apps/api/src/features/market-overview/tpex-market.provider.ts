@@ -63,10 +63,13 @@ export class TpexMarketProvider {
           const changePercent = Number(((change / previousClose) * 100).toFixed(2));
 
           return {
-            asOf,
-            close,
+            value: close,
             change,
             changePercent,
+            state: 'closed' as const,
+            tradeDate: asOf,
+            asOf: null,
+            source: 'tpex' as const,
           };
         },
         catch: (cause) => new TpexMarketError({ cause }),

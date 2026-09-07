@@ -45,10 +45,13 @@ describe('TwseMarketProvider', () => {
       expect(Either.isRight(result)).toBe(true);
       if (Either.isRight(result)) {
         expect(result.right).toEqual({
-          asOf: '2026-09-04',
-          close: 46551.13,
+          value: 46551.13,
           change: 693.47,
           changePercent: 1.51,
+          state: 'closed',
+          tradeDate: '2026-09-04',
+          asOf: null,
+          source: 'twse',
         });
       }
     });
@@ -73,10 +76,13 @@ describe('TwseMarketProvider', () => {
       expect(Either.isRight(result)).toBe(true);
       if (Either.isRight(result)) {
         expect(result.right).toEqual({
-          asOf: '2026-09-03',
-          close: 45857.66,
+          value: 45857.66,
           change: -120.5,
           changePercent: -0.26,
+          state: 'closed',
+          tradeDate: '2026-09-03',
+          asOf: null,
+          source: 'twse',
         });
       }
     });
