@@ -1,6 +1,10 @@
 import type { StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
 import { describe, expect, it } from 'vitest';
-import { indexWatchlistQuotes, resolveQuoteHistoryMode } from './stock-analysis.js';
+import {
+  hasRetryableWatchlistQuotes,
+  indexWatchlistQuotes,
+  resolveQuoteHistoryMode,
+} from './stock-analysis.js';
 
 describe('quote history capability', () => {
   it('forces ESB intraday ranges to 1m and explains official daily data', () => {
@@ -38,5 +42,15 @@ describe('quote history capability', () => {
     expect(Object.keys(indexed)).toEqual(['2330', '7883']);
     expect(indexed['2330']).toEqual(items[0]);
     expect(indexed['7883']).toEqual(items[1]);
+  });
+
+  it('exposes retry for failed batches but not permanent not-found symbols', () => {
+    expect(
+      hasRetryableWatchlistQuotes([
+        { symbol: '2330', quote: null, error: 'failed' },
+        { symbol: '7883', quote: null, error: 'not_found' },
+      ]),
+    ).toBe(true);
+    expect(hasRetryableWatchlistQuotes([{ symbol: '7883', quote: null, error: 'not_found' }])).toBe(false);
   });
 });

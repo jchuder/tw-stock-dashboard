@@ -81,4 +81,26 @@ describe('fetchStockQuoteBatch', () => {
     );
     expect(result.items.map((item) => item.symbol)).toEqual(symbols);
   });
+
+  it('keeps a successful sibling chunk when one chunk request fails', async () => {
+    const symbols = Array.from({ length: 21 }, (_, index) => String(2000 + index));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const requestedSymbols = new URL(String(input)).searchParams.get('symbols')?.split(',') ?? [];
+      if (requestedSymbols.length === 20) {
+        throw new Error('network failure');
+      }
+      return new Response(
+        JSON.stringify({
+          items: requestedSymbols.map((symbol) => ({ symbol, quote: null, error: 'not_found' })),
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchStockQuoteBatches(symbols);
+
+    expect(result.items.slice(0, 20).every((item) => item.error === 'failed')).toBe(true);
+    expect(result.items[20]).toEqual({ symbol: symbols[20], quote: null, error: 'not_found' });
+  });
 });

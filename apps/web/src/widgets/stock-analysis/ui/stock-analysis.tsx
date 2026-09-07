@@ -25,6 +25,10 @@ export function indexWatchlistQuotes(
   return Object.fromEntries(items.map((item) => [item.symbol, item]));
 }
 
+export function hasRetryableWatchlistQuotes(items: readonly StockQuoteBatchItem[]): boolean {
+  return items.some((item) => item.error === 'failed' || item.error === 'unavailable');
+}
+
 export type HistoryDisabledReason = 'fugle-api-key' | 'esb-official-daily';
 
 export interface QuoteHistoryMode {
@@ -76,7 +80,10 @@ export function StockAnalysis({
     staleTime: 10_000,
     retry: false,
   });
-  const watchlistQuotes = indexWatchlistQuotes(watchlistQuoteQuery.data?.items ?? []);
+  const watchlistQuoteItems = watchlistQuoteQuery.data?.items ?? [];
+  const watchlistQuotes = indexWatchlistQuotes(watchlistQuoteItems);
+  const watchlistHasRetryableError =
+    watchlistQuoteQuery.isError || hasRetryableWatchlistQuotes(watchlistQuoteItems);
   const [validatedStock, setValidatedStock] = useState<{ symbol: string; name: string } | null>(
     null,
   );
@@ -203,14 +210,13 @@ export function StockAnalysis({
 
         {validatedStock !== null && <StockHistoryTable symbol={validatedStock.symbol} range={range} />}
       </div>
-
       <aside className="watchlist-rail">
         <StockWatchlistPanel
           items={watchlist}
           quotes={watchlistQuotes}
           isLoading={watchlistQuoteQuery.isPending}
           isRefreshing={watchlistQuoteQuery.isFetching && !watchlistQuoteQuery.isPending}
-          isError={watchlistQuoteQuery.isError}
+          isError={watchlistHasRetryableError}
           onRetry={() => void watchlistQuoteQuery.refetch()}
           activeSymbol={validatedStock?.symbol ?? requestedSymbol}
           onSelectStock={onSelectWatchlistStock}
