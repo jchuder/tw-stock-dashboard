@@ -25,3 +25,26 @@ export async function fetchStockQuoteBatch(symbols: readonly string[]): Promise<
   }
   return Schema.decodeUnknownPromise(StockQuoteBatchResponseSchema)((await res.json()) as unknown);
 }
+
+const MAX_BATCH_SYMBOLS = 20;
+
+export async function fetchStockQuoteBatches(symbols: readonly string[]): Promise<StockQuoteBatchResponse> {
+  const chunks: string[][] = [];
+  for (let index = 0; index < symbols.length; index += MAX_BATCH_SYMBOLS) {
+    chunks.push([...symbols.slice(index, index + MAX_BATCH_SYMBOLS)]);
+  }
+
+  const responses = await Promise.all(
+    chunks.map(async (chunk): Promise<StockQuoteBatchResponse> => {
+      try {
+        return await fetchStockQuoteBatch(chunk);
+      } catch {
+        return {
+          items: chunk.map((symbol) => ({ symbol, quote: null, error: 'failed' as const })),
+        };
+      }
+    }),
+  );
+
+  return { items: responses.flatMap((response) => response.items) };
+}

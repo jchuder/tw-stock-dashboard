@@ -1,4 +1,4 @@
-import type { JSX, KeyboardEvent, MouseEvent } from 'react';
+import type { JSX } from 'react';
 import type { StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
 import type { WatchlistItem } from '../model/stock-watchlist.js';
 
@@ -86,51 +86,42 @@ export function StockWatchlistPanel({
             const isActive = activeSymbol === item.symbol;
             const snapshot = quotes[item.symbol];
             const quote = snapshot?.quote ?? null;
-            const handleRemove = (event: MouseEvent): void => {
-              event.stopPropagation();
+            const handleRemove = (): void => {
               onRemoveStock(item.symbol);
-            };
-            const handleKeyDown = (event: KeyboardEvent<HTMLLIElement>): void => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                onSelectStock(item.symbol);
-              }
             };
 
             return (
-              <li
-                key={item.symbol}
-                className="watchlist-item"
-                aria-current={isActive ? 'true' : undefined}
-                aria-label={`${item.symbol} ${item.name}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelectStock(item.symbol)}
-                onKeyDown={handleKeyDown}
-                data-testid={`watchlist-item-${item.symbol}`}
-              >
-                <span className="watchlist-item-identity">
-                  <strong>{item.symbol}</strong>
-                  <span>{item.name}</span>
-                </span>
-                <span className="watchlist-item-values" data-testid={`watchlist-quote-${item.symbol}`}>
-                  {isLoading && snapshot === undefined ? (
-                    <span className="watchlist-item-status">載入中…</span>
-                  ) : quote !== null ? (
-                    <>
-                      <span className={`watchlist-price ${changeClass(quote.change)}`}>
-                        {formatNullable(quote.price)}
+              <li key={item.symbol} className="watchlist-item" data-testid={`watchlist-item-${item.symbol}`}>
+                <button
+                  type="button"
+                  className="watchlist-item-select"
+                  aria-current={isActive ? 'true' : undefined}
+                  aria-label={`${item.symbol} ${item.name}`}
+                  onClick={() => onSelectStock(item.symbol)}
+                >
+                  <span className="watchlist-item-identity">
+                    <strong>{item.symbol}</strong>
+                    <span>{item.name}</span>
+                  </span>
+                  <span className="watchlist-item-values" data-testid={`watchlist-quote-${item.symbol}`}>
+                    {isLoading && snapshot === undefined ? (
+                      <span className="watchlist-item-status">載入中…</span>
+                    ) : quote !== null ? (
+                      <>
+                        <span className={`watchlist-price ${changeClass(quote.change)}`}>
+                          {formatNullable(quote.price)}
+                        </span>
+                        <span className={`watchlist-change ${changeClass(quote.change)}`}>
+                          {formatChange(quote.change, quote.changePercent)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="watchlist-item-status">
+                        {snapshot === undefined && isError ? '暫時無法更新' : formatBatchError(snapshot?.error ?? null)}
                       </span>
-                      <span className={`watchlist-change ${changeClass(quote.change)}`}>
-                        {formatChange(quote.change, quote.changePercent)}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="watchlist-item-status">
-                      {snapshot === undefined && isError ? '暫時無法更新' : formatBatchError(snapshot?.error ?? null)}
-                    </span>
-                  )}
-                </span>
+                    )}
+                  </span>
+                </button>
                 <button
                   type="button"
                   className="btn-remove"

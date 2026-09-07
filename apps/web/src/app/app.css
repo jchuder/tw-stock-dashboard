@@ -639,21 +639,36 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  cursor: pointer;
+  padding: 0 12px 0 0;
   border-top: 1px solid #eff1f0;
   border-radius: 8px;
   transition: background-color 0.15s ease;
   font-size: 13px;
 }
 
-.watchlist-item:hover {
+.watchlist-item-select {
+  display: flex;
+  flex: 1;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 0 10px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.watchlist-item-select:hover {
   background-color: #fafcfb;
 }
 
-.watchlist-item:focus-visible {
+.watchlist-item-select:focus-visible {
   outline: 2px solid #b7bdb9;
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .watchlist-item-identity {
@@ -698,7 +713,7 @@ button {
   white-space: nowrap;
 }
 
-.watchlist-item[aria-current="true"] {
+.watchlist-item-select[aria-current='true'] {
   background-color: #e2e8f0;
   font-weight: 600;
 }

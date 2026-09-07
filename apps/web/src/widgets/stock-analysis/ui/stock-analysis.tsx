@@ -4,7 +4,7 @@ import type { JSX } from 'react';
 import type { HistoryRange, Market, StockQuoteBatchItem } from '@tw-stock-dashboard/contracts';
 import { StockHistoryFocus, StockHistoryTable } from '../../../features/stock-history/index.js';
 import type { MaVisibility } from '../../../features/stock-history/ui/stock-history-chart.js';
-import { fetchStockQuoteBatch, StockQuotePanel } from '../../../features/stock-quote/index.js';
+import { fetchStockQuoteBatches, StockQuotePanel } from '../../../features/stock-quote/index.js';
 import type { QuoteResolvedInfo } from '../../../features/stock-quote/index.js';
 import {
   addToWatchlist,
@@ -70,7 +70,7 @@ export function StockAnalysis({
   const watchlistSymbols = watchlist.map((item) => item.symbol);
   const watchlistQuoteQuery = useQuery({
     queryKey: ['watchlist-quotes', watchlistSymbols],
-    queryFn: () => fetchStockQuoteBatch(watchlistSymbols),
+    queryFn: () => fetchStockQuoteBatches(watchlistSymbols),
     enabled: watchlistSymbols.length > 0,
     refetchInterval: 15_000,
     staleTime: 10_000,
