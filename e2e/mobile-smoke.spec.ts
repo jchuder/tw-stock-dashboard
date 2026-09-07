@@ -1,8 +1,24 @@
 import { expect, test } from '@playwright/test';
 
 const MOCK_MARKET_OVERVIEW = {
-  taiex: { asOf: '2026-09-04', close: 46551.13, change: 693.47, changePercent: 1.51 },
-  otc: { asOf: '2026-09-04', close: 402.48, change: 7.23, changePercent: 1.83 },
+  taiex: {
+    value: 46551.13,
+    change: 693.47,
+    changePercent: 1.51,
+    state: 'closed',
+    tradeDate: '2026-09-04',
+    asOf: null,
+    source: 'twse',
+  },
+  otc: {
+    value: 402.48,
+    change: 7.23,
+    changePercent: 1.83,
+    state: 'closed',
+    tradeDate: '2026-09-04',
+    asOf: null,
+    source: 'tpex',
+  },
   institutional: {
     asOf: '2026-09-04',
     market: 'TWSE' as const,
@@ -18,7 +34,8 @@ const QUOTE_2330 = {
   name: '台積電',
   market: 'TWSE',
   price: 2410,
-  previousClose: 2390,
+  referencePrice: 2390,
+  referencePriceType: 'previous_close',
   change: 20,
   changePercent: 0.84,
   tradeDate: '2026-09-04',
@@ -32,6 +49,7 @@ const QUOTE_2330 = {
   source: {
     provider: 'fugle',
     fallbackUsed: false,
+    fallbackReason: null,
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -44,9 +62,15 @@ const CANDLES_2330 = {
   range: '1d',
   timeframe: '5m',
   volumeUnit: 'lot',
+  priceBasis: 'close',
+  source: {
+    provider: 'fugle',
+    mode: 'intraday',
+    asOf: null,
+  },
   candles: [
-    { date: '2026-09-04T09:00:00.000+08:00', open: 2300, high: 2320, low: 2280, close: 2310, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
-    { date: '2026-09-04T09:05:00.000+08:00', open: 2310, high: 2330, low: 2300, close: 2320, volume: 900, ma5: 2315, ma10: null, ma20: null, ma60: null },
+    { date: '2026-09-04T09:00:00.000+08:00', open: 2300, high: 2320, low: 2280, close: 2310, average: null, volume: 850, ma5: null, ma10: null, ma20: null, ma60: null },
+    { date: '2026-09-04T09:05:00.000+08:00', open: 2310, high: 2330, low: 2300, close: 2320, average: null, volume: 900, ma5: 2315, ma10: null, ma20: null, ma60: null },
   ],
 };
 
@@ -68,8 +92,8 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
 
   await page.addInitScript(() => {
     localStorage.setItem(
-      'tw-stock-dashboard.watchlist.v1',
-      JSON.stringify([{ symbol: '2330', name: '台積電' }]),
+      'tw-stock-dashboard.watchlist.v2',
+      JSON.stringify(['2330']),
     );
   });
 
@@ -93,7 +117,7 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
 
   // Quote and chart load properly
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
-  await expect(page.getByTestId('stock-quote-price')).toHaveText('2410');
+  await expect(page.getByTestId('stock-quote-price')).toHaveText('2,410');
   await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 20 (+0.84%)');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
   await expect(page.getByTestId('recent-trading-table')).toBeVisible();

@@ -16,13 +16,15 @@ const FUGLE_BODY = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
   ...ENRICHED_QUOTE,
   source: {
     provider: 'fugle',
     fallbackUsed: false,
+    fallbackReason: null,
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
@@ -34,21 +36,50 @@ const MIS_BODY = {
   name: '台積電',
   market: 'TWSE',
   price: 568,
-  previousClose: 566,
+  referencePrice: 566,
+  referencePriceType: 'previous_close',
   change: 2,
   changePercent: 0.35,
   ...ENRICHED_QUOTE,
   source: {
     provider: 'twse-mis',
     fallbackUsed: true,
+    fallbackReason: 'upstream_unavailable',
     fetchedAt: '2026-09-06T03:45:06.000Z',
     asOf: '2026-09-04T05:30:00.000Z',
     cacheHit: false,
   },
 };
 
-const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至 TWSE MIS';
+const OFFICIAL_PUBLIC_TWSE_BODY = {
+  ...MIS_BODY,
+  price: 2410,
+  referencePrice: 2390,
+  change: 20,
+  changePercent: 0.84,
+  tradeDate: '2026-09-04',
+  openPrice: 2415,
+  highPrice: 2415,
+  lowPrice: 2390,
+  tradeVolume: 14102.018,
+  source: {
+    provider: 'twse-openapi',
+    fallbackUsed: true,
+    fallbackReason: 'config_missing',
+    fetchedAt: '2026-09-06T03:45:06.000Z',
+    asOf: null,
+    cacheHit: false,
+  },
+};
+
+const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至備援資料來源';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('tw-stock-dashboard.watchlist.v2', JSON.stringify(['2330']));
+  });
+});
 
 test('stock quote happy path', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
@@ -71,7 +102,7 @@ test('stock quote happy path', async ({ page }) => {
   await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 2 (+0.35%)');
   await expect(page.getByRole('group', { name: '目前股價 568，較前一交易日上漲 2，漲跌幅 0.35%' })).toBeVisible();
   await expect(page.getByText('前一交易日收盤 566')).toBeVisible();
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
   await expect(page.getByText('最後更新：2026/09/04 13:30:00')).toBeVisible();
   // Enriched session grid
   await expect(page.getByTestId('focus-quote-grid')).toContainText('開盤價');
@@ -136,7 +167,7 @@ test('source fallback and recovery toasts', async ({ page }) => {
   await page.goto('/');
 
   // Response 1: live Fugle (boot autofocus query) — badge, no toast.
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
   await expect(page.getByText(FALLBACK_TOAST)).toHaveCount(0);
 
   await page.getByPlaceholder('請輸入股票代號').fill('2330');
@@ -149,14 +180,14 @@ test('source fallback and recovery toasts', async ({ page }) => {
 
   // Response 3: cached MIS — badge stays, no additional toast.
   await search.click();
-  await expect(page.getByText('快取')).toBeVisible();
+  await expect(page.getByText('Cache')).toBeVisible();
   await expect(page.getByText(FALLBACK_TOAST)).toHaveCount(1);
   await expect(page.getByText(RECOVERY_TOAST)).toHaveCount(0);
 
   // Response 4: live Fugle again — recovery toast, badge back.
   await search.click();
   await expect(page.getByText(RECOVERY_TOAST)).toHaveCount(1);
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
 });
 
 test('same-symbol refresh clears header provenance until new quote resolves', async ({ page }) => {
@@ -184,6 +215,7 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
         source: {
           provider: 'twse-mis',
           fallbackUsed: true,
+          fallbackReason: 'upstream_unavailable',
           fetchedAt: '2026-09-06T04:00:00.000Z',
           asOf: '2026-09-04T05:35:00.000Z',
           cacheHit: false,
@@ -195,7 +227,7 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
   await page.goto('/');
 
   // Response 1 (boot autofocus query): header displays initial source and update time
-  await expect(page.getByText('資料來源：Fugle API Connected').first()).toBeVisible();
+  await expect(page.getByText('資料來源：Fugle API').first()).toBeVisible();
   await expect(page.getByText('最後更新：2026/09/04 13:30:00')).toBeVisible();
 
   // Trigger same-symbol refresh
@@ -212,4 +244,79 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
   // Header updates with the new response source and timestamp
   await expect(page.getByText('資料來源：TWSE MIS').first()).toBeVisible();
   await expect(page.getByText('最後更新：2026/09/04 13:35:00')).toBeVisible();
+});
+
+test('public data mode shows persistent banner, disables 5m candles, and updates source info', async ({ page }) => {
+  await page.route('**/api/v1/stocks/2330/quote', (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(OFFICIAL_PUBLIC_TWSE_BODY),
+    });
+  });
+
+  await page.route('**/api/v1/stocks/2330/history?range=1m', (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        symbol: '2330',
+        market: 'TWSE',
+        range: '1m',
+        timeframe: '1d',
+        volumeUnit: 'share',
+        priceBasis: 'close',
+        source: {
+          provider: 'twse',
+          mode: 'eod',
+          asOf: '2026-09-04',
+        },
+        candles: [
+          {
+            date: '2026-09-04',
+            open: 560,
+            high: 570,
+            low: 559,
+            close: 568,
+            average: null,
+            volume: 12345678,
+            ma5: 565,
+            ma10: null,
+            ma20: null,
+            ma60: null,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  // 1. Header displays TWSE OpenAPI（公開資料模式）
+  await expect(page.getByText('資料來源：TWSE OpenAPI（公開資料模式）').first()).toBeVisible();
+
+  // 2. Persistent amber banner is visible
+  const banner = page.getByTestId('public-data-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('公開資料模式');
+  await expect(banner).toContainText('報價來自 TWSE / TPEx 官方盤後日線');
+
+  // 3. Fallback toast should NOT be shown
+  await expect(page.getByText(FALLBACK_TOAST)).not.toBeVisible();
+
+  // 4. Intraday range buttons (當日, 3D, 5D) are disabled
+  const dayBtn = page.getByRole('button', { name: '當日' });
+  const threeDayBtn = page.getByRole('button', { name: '3D' });
+  const fiveDayBtn = page.getByRole('button', { name: '5D' });
+  await expect(dayBtn).toBeDisabled();
+  await expect(threeDayBtn).toBeDisabled();
+  await expect(fiveDayBtn).toBeDisabled();
+  await expect(dayBtn).toHaveAttribute('title', '5 分 K 需設定 Fugle API Key');
+
+  // 5. 1M range button is active by default in public data mode
+  const oneMonthBtn = page.getByRole('button', { name: '1M' });
+  await expect(oneMonthBtn).toHaveClass(/active/);
+
+  // 6. Chart source badge shows TWSE · 官方盤後日 K · 更新至 2026/09/04
+  await expect(page.getByTestId('chart-source-badge')).toHaveText('TWSE · 官方盤後日 K · 更新至 2026/09/04');
 });
