@@ -105,12 +105,13 @@ export class UniverseResolver {
     const lkg = await Effect.runPromise(this.cache.getJson(UNIVERSE_LKG_CACHE_KEY));
     const lkgDecoded = lkg === null ? null : Schema.decodeUnknownEither(Schema.Array(SecuritySchema))(lkg);
     if (lkgDecoded !== null && lkgDecoded._tag === 'Right') {
-      // Merge with fresh partial winning: LKG must not shadow symbols that a
-      // successful source already returned (e.g. a listing that postdates it).
+      // Merge with fresh partial winning, but the union is still unverified:
+      // a symbol missing from both is inconclusive, so misses fail 503.
+      // Only a canonical-complete cache or an all-sources build earns 404s.
       log.warn(`Universe rebuild partial (${build.failures.join(',')}); serving merged last-known-good`);
       return {
         bySymbol: { ...indexBySymbol(lkgDecoded.right), ...indexBySymbol(build.securities) },
-        complete: true,
+        complete: false,
         degraded: true,
       };
     }

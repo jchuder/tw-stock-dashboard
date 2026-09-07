@@ -94,7 +94,11 @@ describe('UniverseResolver', () => {
     const resolver = new UniverseResolver(cache, fakeProvider({ securities: [], complete: false, failures: ['x'] }));
 
     expect(await resolveOf(resolver, '7883')).toEqual(Either.right(FULL[1]));
-    expect(await resolveOf(resolver, '999999')).toEqual(Either.left(new StockNotFoundError()));
+    const missing = await resolveOf(resolver, '999999');
+    expect(Either.isLeft(missing)).toBe(true);
+    if (Either.isLeft(missing)) {
+      expect(missing.left).toBeInstanceOf(UniverseUnavailableError);
+    }
   });
 
   it('prefers fresh partial rows over last-known-good', async () => {
