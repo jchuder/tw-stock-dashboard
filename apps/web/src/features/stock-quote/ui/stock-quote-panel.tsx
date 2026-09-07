@@ -200,7 +200,7 @@ export function StockQuotePanel({
             }}
           >
             <span>{formatReference(quote.data.referencePrice, quote.data.referencePriceType)}</span>
-            {source.cacheHit && <span className="badge-cache">快取</span>}
+            {source.cacheHit && <span className="badge-cache">Cache</span>}
           </div>
           <div data-testid="focus-quote-grid" className="focus-quote-grid">
             <QuoteCell label="開盤價" value={formatNullable(quote.data.openPrice)} compare={quote.data.openPrice} referencePrice={quote.data.referencePrice} />

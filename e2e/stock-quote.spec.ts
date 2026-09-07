@@ -159,7 +159,7 @@ test('source fallback and recovery toasts', async ({ page }) => {
 
   // Response 3: cached MIS — badge stays, no additional toast.
   await search.click();
-  await expect(page.getByText('快取')).toBeVisible();
+  await expect(page.getByText('Cache')).toBeVisible();
   await expect(page.getByText(FALLBACK_TOAST)).toHaveCount(1);
   await expect(page.getByText(RECOVERY_TOAST)).toHaveCount(0);
 
