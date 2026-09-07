@@ -92,8 +92,8 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
 
   await page.addInitScript(() => {
     localStorage.setItem(
-      'tw-stock-dashboard.watchlist.v1',
-      JSON.stringify([{ symbol: '2330', name: '台積電' }]),
+      'tw-stock-dashboard.watchlist.v2',
+      JSON.stringify(['2330']),
     );
   });
 
@@ -117,7 +117,7 @@ test('mobile viewport smoke: usable search, market overview, watchlist, and char
 
   // Quote and chart load properly
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
-  await expect(page.getByTestId('stock-quote-price')).toHaveText('2410');
+  await expect(page.getByTestId('stock-quote-price')).toHaveText('2,410');
   await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 20 (+0.84%)');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
   await expect(page.getByTestId('recent-trading-table')).toBeVisible();

@@ -96,17 +96,11 @@ const CANDLES_2330 = {
   ],
 };
 
-const WATCHLIST_ITEMS = [
-  { symbol: '2330', name: '台積電' },
-  { symbol: '2317', name: '鴻海' },
-  { symbol: '2454', name: '聯發科' },
-  { symbol: '2603', name: '長榮' },
-  { symbol: '0050', name: '元大台灣50' },
-];
+const WATCHLIST_ITEMS = ['2330', '2317', '2454', '2603', '0050'];
 
 test.use({ viewport: { width: 1440, height: 1000 } });
 
-test('capture dashboard screenshot for documentation', async ({ page }) => {
+test('capture dashboard screenshot for documentation', async ({ page }, testInfo) => {
   await page.route('**/api/v1/market/overview', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_MARKET_OVERVIEW) });
@@ -127,7 +121,7 @@ test('capture dashboard screenshot for documentation', async ({ page }) => {
   });
 
   await page.addInitScript((items) => {
-    localStorage.setItem('tw-stock-dashboard.watchlist.v1', JSON.stringify(items));
+    localStorage.setItem('tw-stock-dashboard.watchlist.v2', JSON.stringify(items));
   }, WATCHLIST_ITEMS);
 
   await page.goto('/');
@@ -139,7 +133,7 @@ test('capture dashboard screenshot for documentation', async ({ page }) => {
 
   // Wait for quote, chart, and recent table to settle
   await expect(page.getByTestId('stock-quote-title')).toHaveText('2330 台積電');
-  await expect(page.getByTestId('stock-quote-price')).toHaveText('2410');
+  await expect(page.getByTestId('stock-quote-price')).toHaveText('2,410');
   await expect(page.getByTestId('stock-quote-change')).toHaveText('▲ 20 (+0.84%)');
   await expect(page.getByTestId('stock-history-chart')).toBeVisible();
 
@@ -150,5 +144,5 @@ test('capture dashboard screenshot for documentation', async ({ page }) => {
   // Wait 500ms for lightweight-charts rendering canvas to complete animation/layout
   await page.waitForTimeout(500);
 
-  await page.screenshot({ path: 'docs/dashboard.png', fullPage: false });
+  await page.screenshot({ path: testInfo.outputPath('dashboard.png'), fullPage: false });
 });
