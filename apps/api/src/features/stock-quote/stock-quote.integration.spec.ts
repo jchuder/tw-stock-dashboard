@@ -226,7 +226,9 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       },
     );
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    // MIS is probed as a completed-session freshness candidate; without a
+    // session date it loses to the official snapshot.
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
     expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
   });
 
@@ -255,7 +257,8 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       },
     });
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    // MIS entry targets another symbol, so the candidate is unusable here.
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
     expect(callsTo(fetchMock, TPEX_DAILY_QUOTE_URL)).toBe(1);
   });
 
@@ -396,13 +399,13 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
-  it('uses official daily data instead of Fugle or MIS when the key is missing', async () => {
+  it('probes MIS as a freshness candidate but serves official daily when MIS has no session date', async () => {
     const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
     expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
   });
 
