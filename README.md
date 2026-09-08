@@ -110,7 +110,7 @@ flowchart TB
 2. Effect 負責業務邏輯與效果運算：
    - 將預期失敗建模於 typed error channel；刻意讓 defects 保持 defects。
    - 強健性機制：精確設定 3 秒超時控制（Timeout）與並行排程（Concurrency），專案不採用任何 upstream 重試（no retry）。
-   - 優雅降級備援（Fallback）：未設定 Fugle key 時，TWSE/TPEX 個股使用交易所官方盤後日線；Fugle 已設定但暫時性網路中斷或服務異常時，才切換至 TWSE MIS。ESB 個股則直接使用 TPEx ESB 專用報價資料源。
+   - 優雅降級備援（Fallback）：未設定 Fugle key 時，TWSE/TPEX 個股以交易所官方盤後日線為主要來源；若盤後 OpenAPI 尚未更新，系統可使用 MIS 已完成交易時段的收盤資料，避免較舊交易日覆蓋較新的已完成交易日（Public Data Mode 不使用 MIS 盤中行情）。Fugle 已設定但暫時性網路中斷或服務異常時，才切換至 TWSE MIS。ESB 個股則直接使用 TPEx ESB 專用報價資料源。
 
 ## 市場資料來源與限制說明
 
@@ -118,7 +118,7 @@ flowchart TB
 
 | 功能 | 主要資料來源 | 備援或市場專用來源 | Cache 策略 |
 | :--- | :--- | :--- | :--- |
-| 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（TWSE/TPEX 盤中行情與漲跌停 ground truth） | 未設定 key：TWSE / TPEx 官方 OpenAPI 盤後日線（Public Data Mode）；Fugle 暫時性失敗：TWSE MIS；TPEx ESB（ESB 專用報價；以前一交易日均價為漲跌比較基準） | 5 秒 in-memory TTL cache |
+| 個股報價（Quote） | 富果 Fugle Intraday Quote + Ticker（TWSE/TPEX 盤中行情與漲跌停 ground truth） | 未設定 key：TWSE / TPEx 官方 OpenAPI 盤後日線為主，OpenAPI 落後時以 MIS 已完成交易時段收盤補齊（Public Data Mode，不用 MIS 盤中行情）；Fugle 暫時性失敗：TWSE MIS；TPEx ESB（ESB 專用報價；以前一交易日均價為漲跌比較基準） | 5 秒 in-memory TTL cache |
 | 歷史 K 線（History） | 富果 Fugle MarketData API（提供 5 分 K 與日 K；Enhanced Mode 預設 1D） | TWSE / TPEx 官方盤後日線（TWSE/TPEX 未設定 key 或 Fugle 暫時性失敗時降級，限日 K；Public Data Mode 預設 1M） | 官方月資料：當月 cache 5 分鐘，已結束月份 cache 24 小時；Fugle 日 K 不使用 cache |
 | 興櫃歷史資料（ESB History） | TPEx 興櫃官方歷史資料（官方日均價） | 無 | 官方月資料：當月 cache 5 分鐘，已結束月份 cache 24 小時；average-basis |
 | 加權指數（TAIEX） | TWSE MIS（單次批次抓取即時行情） | TWSE OpenAPI（日終盤後 EOD 資料平滑降級） | 30 秒動態輪詢，不使用 cache |
@@ -127,7 +127,7 @@ flowchart TB
 
 ### 重要說明
 
-1. **公開資料模式（Public Data Mode）**：若未設定 `FUGLE_API_KEY`（或留空），系統自動啟用公開資料模式。TWSE/TPEX 個股報價改由 TWSE / TPEx 官方 OpenAPI 盤後日線提供，不依賴 TWSE MIS；ESB 個股則使用 TPEx 官方 ESB latest-statistics snapshot。官方日線沒有可靠的盤中時間戳或當前漲跌停 ground truth，因此 Header 顯示對應 OpenAPI 來源與「公開資料模式」，盤中 5 分 K 按鈕自動停用；非 ESB 個股預設進入 1M 日 K 視角，並在焦點個股頂部常駐顯示琥珀色揭露橫幅。
+1. **公開資料模式（Public Data Mode）**：若未設定 `FUGLE_API_KEY`（或留空），系統自動啟用公開資料模式。TWSE/TPEX 個股報價以 TWSE / TPEx 官方 OpenAPI 盤後日線為主要來源；若盤後 OpenAPI 尚未更新，系統可使用 MIS 已完成交易時段的收盤資料，避免較舊交易日覆蓋較新的已完成交易日（不使用 MIS 盤中行情）；ESB 個股則使用 TPEx 官方 ESB latest-statistics snapshot。官方日線沒有可靠的盤中時間戳或當前漲跌停 ground truth，因此 Header 顯示對應來源與「公開資料模式」，盤中 5 分 K 按鈕自動停用；非 ESB 個股預設進入 1M 日 K 視角，並在焦點個股頂部常駐顯示琥珀色揭露橫幅。
 2. **Enhanced Mode**：設定有效之 `FUGLE_API_KEY` 時啟用，TWSE/TPEX 個股預設提供盤中 1D（5 分 K）高頻即時行情與完整走勢；ESB 仍使用 TPEx 官方日均價歷史資料。
 3. TWSE／TPEx／ESB 的官方歷史資料端點主要於交易日收盤後更新當日資料；上市／上櫃顯示收盤資訊，興櫃顯示日均價。ESB 即時報價另由 TPEx ESB latest-statistics snapshot 提供。
 

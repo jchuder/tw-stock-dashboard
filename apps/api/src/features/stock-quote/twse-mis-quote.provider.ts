@@ -9,16 +9,23 @@ import {
   TwseMisEntrySchema,
   TwseMisQuoteSchema,
   parseFiniteNumber,
+  parseMisSessionTime,
   parseMisTradeDate,
   round2,
 } from './twse-mis-quote.schema.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
+// MIS quote result with the normalized session time. Public Data Mode needs
+// it to prove a completed close; the base provider contract stays untouched.
+export interface TwseMisQuoteResult extends QuoteProviderResult {
+  readonly sessionTime: string | null;
+}
+
 const TWSE_MIS_URL = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
 
 @Injectable()
 export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
-  getQuote(symbol: string): Effect.Effect<QuoteProviderResult, TwseMisQuoteError> {
+  getQuote(symbol: string): Effect.Effect<TwseMisQuoteResult, TwseMisQuoteError> {
     return Effect.gen(function* () {
       // No stock-universe feature exists, so never guess the listing market:
       // query both tse_ and otc_ and pick the entry matching the symbol.
@@ -83,7 +90,7 @@ export class TwseMisQuoteProvider implements QuoteProvider<TwseMisQuoteError> {
         limitUpPrice: entry.u === undefined ? null : parseFiniteNumber(entry.u),
         limitDownPrice: entry.w === undefined ? null : parseFiniteNumber(entry.w),
       }).pipe(Effect.mapError(() => new TwseMisDecodeError({ stage: 'schema' })));
-      return { quote, asOf: toIsoOrNull(entry.tlong) };
+      return { quote, asOf: toIsoOrNull(entry.tlong), sessionTime: parseMisSessionTime(entry.t) };
     });
   }
 }

@@ -119,30 +119,7 @@ export class StockQuoteService {
                 return Effect.fail(error);
               }
               const fallback = fallbackReason(error);
-              const toProvider = officialDailyProvider(officialMarket);
-              const logPayload = {
-                event: 'market_data_fallback',
-                operation: 'quote',
-                symbol,
-                from_provider: 'fugle',
-                to_provider: toProvider,
-                fallback_reason: 'config_missing' as const,
-                ...fallback,
-              };
-              this.logger.info(logPayload);
-              addSpanEvent('market_data.fallback', {
-                'stock.symbol': symbol,
-                'market_data.from_provider': 'fugle',
-                'market_data.to_provider': toProvider,
-                'market_data.reason': fallback.reason,
-                'market_data.reason_type': 'config_missing',
-              });
-              return Effect.map(this.officialDailyQuoteProvider.getQuote(symbol, officialMarket), (result) => ({
-                ...result,
-                provider: toProvider,
-                fallbackUsed: true,
-                fallbackReason: 'config_missing' as const,
-              }));
+              return this.resolvePublicDataQuote(symbol, officialMarket, fallback);
             }
 
             const fallback = fallbackReason(error);
@@ -193,6 +170,98 @@ export class StockQuoteService {
         return { symbol, quote: null, error: batchError(outcome.left) };
       });
       return { items };
+    });
+  }
+
+  // Public Data Mode (no Fugle key): official daily EOD plus TWSE MIS as a
+  // completed-session freshness candidate. A MIS snapshot counts as a closed
+  // candidate only with proof of a completed close: session time >= 13:30 on
+  // a prior date, or the same proof observed after today's 13:35 settlement
+  // grace. Missing/invalid session time can never override official — date
+  // alone is not proof of a completed session. Between two closed snapshots
+  // the newer tradeDate wins either direction. MIS is auxiliary: its failure
+  // never breaks Public Data availability. fallbackReason stays
+  // config_missing because the frontend keys Public Data Mode off it.
+  private resolvePublicDataQuote(
+    symbol: string,
+    market: 'TWSE' | 'TPEX',
+    fallback: FallbackReason,
+  ): Effect.Effect<
+    QuoteProviderResult & {
+      readonly provider: 'twse-openapi' | 'tpex-openapi' | 'twse-mis';
+      readonly fallbackUsed: true;
+      readonly fallbackReason: 'config_missing';
+    },
+    OfficialDailyQuoteError
+  > {
+    return Effect.gen(this, function* () {
+      const nowMs = yield* Clock.currentTimeMillis;
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Taipei',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).formatToParts(new Date(nowMs));
+      const byType: Record<string, string> = {};
+      for (const part of parts) {
+        byType[part.type] = part.value;
+      }
+      const today = `${byType.year}-${byType.month}-${byType.day}`;
+      const nowTime = `${byType.hour}:${byType.minute}:${byType.second}`;
+      const official = yield* this.officialDailyQuoteProvider.getQuote(symbol, market);
+      const mis = yield* this.twseMisQuoteProvider.getQuote(symbol).pipe(
+        Effect.asSome,
+        Effect.catchAll(() => Effect.succeedNone),
+      );
+      const misResult = mis._tag === 'Some' ? mis.value : null;
+      const misDate = misResult?.quote.tradeDate ?? null;
+      const misTime = misResult?.sessionTime ?? null;
+      let winner: {
+        result: QuoteProviderResult;
+        provider: 'twse-openapi' | 'tpex-openapi' | 'twse-mis';
+      };
+      if (
+        misResult !== null &&
+        misDate !== null &&
+        misTime !== null &&
+        misTime >= '13:30:00' &&
+        (misDate < today || (misDate === today && nowTime >= '13:35:00')) &&
+        (official.quote.tradeDate === null || misDate > official.quote.tradeDate)
+      ) {
+        winner = { result: misResult, provider: 'twse-mis' };
+      } else {
+        winner = {
+          result: official,
+          provider: market === 'TWSE' ? 'twse-openapi' : 'tpex-openapi',
+        };
+      }
+      const logPayload = {
+        event: 'market_data_fallback',
+        operation: 'quote',
+        symbol,
+        from_provider: 'fugle',
+        to_provider: winner.provider,
+        fallback_reason: 'config_missing' as const,
+        ...fallback,
+      };
+      this.logger.info(logPayload);
+      addSpanEvent('market_data.fallback', {
+        'stock.symbol': symbol,
+        'market_data.from_provider': 'fugle',
+        'market_data.to_provider': winner.provider,
+        'market_data.reason': fallback.reason,
+        'market_data.reason_type': 'config_missing',
+      });
+      return {
+        ...winner.result,
+        provider: winner.provider,
+        fallbackUsed: true as const,
+        fallbackReason: 'config_missing' as const,
+      };
     });
   }
 
@@ -284,9 +353,6 @@ function fallbackReason(error: FugleQuoteError): FallbackReason {
   }
 }
 
-function officialDailyProvider(market: 'TWSE' | 'TPEX'): Extract<StockQuoteProvider, 'twse-openapi' | 'tpex-openapi'> {
-  return market === 'TWSE' ? 'twse-openapi' : 'tpex-openapi';
-}
 function servedSpanAttributes(provider: StockQuoteProvider, fallbackUsed: boolean, cacheHit: boolean) {
   return {
     'market_data.provider': provider,

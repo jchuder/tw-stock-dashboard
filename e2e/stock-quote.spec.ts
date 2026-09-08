@@ -299,7 +299,7 @@ test('public data mode shows persistent banner, disables 5m candles, and updates
   const banner = page.getByTestId('public-data-banner');
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('公開資料模式');
-  await expect(banner).toContainText('報價來自 TWSE / TPEx 官方盤後日線');
+  await expect(banner).toContainText('報價來自 TWSE / TPEx 官方公開收盤資料');
 
   // 3. Fallback toast should NOT be shown
   await expect(page.getByText(FALLBACK_TOAST)).not.toBeVisible();
