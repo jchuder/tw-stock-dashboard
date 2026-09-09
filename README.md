@@ -107,7 +107,6 @@ flowchart TB
 1. NestJS 負責平台與框架邊界：
    - 提供標準 HTTP 伺服器、控制器（Controllers）路由映射、中介軟體與依賴注入（Dependency Injection）容器。
    - 管理模組生命週期，提供清楚的進入點與清晰的模組結構。
-
 2. Effect 負責業務邏輯與效果運算：
    - 將預期失敗建模於 typed error channel；刻意讓 defects 保持 defects。
    - 強健性機制：精確設定 3 秒超時控制（Timeout）與並行排程（Concurrency），專案不採用任何 upstream 重試（no retry）。
@@ -261,6 +260,46 @@ mise run demo
 | `pnpm verify:boundaries` | 驗證模組架構邊界防護規則 |
 | `pnpm dev:web:tunnel` | 啟動前端相對路徑 Tunnel 模式（供 Cloudflare 反向代理使用） |
 | `mise run demo` | 一鍵建置並平行啟動後端（含 OTel）、前端與 Cloudflare Tunnel |
+
+## 版本管理與 Release
+
+本專案使用 Changesets 3 管理 monorepo 內各 workspace package 的獨立 Semantic Version。
+一般 feature / fix branch 只提交程式碼、測試與 `.changeset/*.md`；真正的 `package.json` 版本更新會集中在 `Version Packages PR`，確認 release 後才由 `dev` merge 到 `main`。
+
+```mermaid
+flowchart LR
+  FEATURE(["feature/* / fix/*"])
+  FEATURE_PR{{"Feature PR"}}
+  DEV(["dev<br/>整合中"])
+  VERSION_PR{{"Version Packages PR"}}
+  READY(["dev<br/>release-ready"])
+  RELEASE_PR{{"Release PR"}}
+  MAIN(["main"])
+  TAG_WF[["Release Tags Workflow"]]
+  TAGS["Package Git Tags"]
+
+  FEATURE -->|"開 PR"| FEATURE_PR
+  FEATURE_PR -->|"merge"| DEV
+  DEV -->|"自動建立 / 更新"| VERSION_PR
+  VERSION_PR -->|"merge"| READY
+  READY -->|"開 PR"| RELEASE_PR
+  RELEASE_PR -->|"merge"| MAIN
+  MAIN --> TAG_WF
+  TAG_WF --> TAGS
+
+  classDef branch fill:#e8f1ff,stroke:#2563eb,stroke-width:2px,color:#172554
+  classDef pr fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#581c87
+  classDef workflow fill:#fff7d6,stroke:#ca8a04,stroke-width:2px,color:#713f12
+  classDef output fill:#eaf7ee,stroke:#16a34a,stroke-width:2px,color:#14532d
+
+  class FEATURE,DEV,READY,MAIN branch
+  class FEATURE_PR,VERSION_PR,RELEASE_PR pr
+  class TAG_WF workflow
+  class TAGS output
+```
+
+圖中藍色圓角節點是 Git branch，紫色六角形是 Pull Request，黃色雙框是 GitHub workflow，綠色節點是 release output。
+完整的 Changesets、一般 release、production hotfix 與 package dependency bump 流程請看 [`docs/versioning-and-releases.md`](docs/versioning-and-releases.md)；第一次啟用 GitHub automation 前，另請完成 [`docs/versioning-github-setup.md`](docs/versioning-github-setup.md) 的一次性設定。
 
 ## 可觀測性（Observability，選填）
 

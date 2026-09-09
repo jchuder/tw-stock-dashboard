@@ -1,0 +1,129 @@
+name: Version Packages
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: version-packages-dev
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create repository automation token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout dev
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          install: true
+
+      - name: Detect pending changesets
+        id: pending
+        shell: bash
+        run: |
+          if find .changeset -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -print -quit | grep -q .; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Close stale version PR
+        if: steps.pending.outputs.found != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          pr_number="$(gh pr list --base dev --head release/versions --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$pr_number" ]; then
+            gh pr close "$pr_number" --comment "Closing because dev has no pending changesets."
+          fi
+
+      - name: Build release plan
+        if: steps.pending.outputs.found == 'true'
+        shell: bash
+        run: pnpm changeset status --verbose | tee /tmp/changeset-status.txt
+
+      - name: Version packages
+        if: steps.pending.outputs.found == 'true'
+        shell: bash
+        run: |
+          git switch -C release/versions
+          pnpm version:packages
+          pnpm install --lockfile-only
+
+      - name: Configure automation Git identity
+        if: steps.pending.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        shell: bash
+        run: |
+          bot_login="${APP_SLUG}[bot]"
+          bot_id="$(gh api "/users/${bot_login}" --jq .id)"
+          git config user.name "$bot_login"
+          git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
+
+      - name: Commit version changes
+        if: steps.pending.outputs.found == 'true'
+        shell: bash
+        run: |
+          git add --all
+          git commit -m "chore(release): Version packages"
+          git push --force-with-lease origin HEAD:release/versions
+
+      - name: Create or update version PR
+        if: steps.pending.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          cat > /tmp/version-pr-body.md <<'EOF'
+          ## Version Packages
+
+          This PR is generated from pending Changesets on `dev`.
+
+          Review the package version bumps and changelogs. Merge this PR into `dev` when the release candidate is ready; then open and merge a `dev → main` release PR only when releasing.
+
+          Do not add product changes to this branch.
+
+          ### Pending release plan
+
+          ```text
+          EOF
+          cat /tmp/changeset-status.txt >> /tmp/version-pr-body.md
+          cat >> /tmp/version-pr-body.md <<'EOF'
+          ```
+          EOF
+
+          pr_number="$(gh pr list --base dev --head release/versions --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$pr_number" ]; then
+            gh pr edit "$pr_number" --title "chore(release): Version packages" --body-file /tmp/version-pr-body.md
+          else
+            gh pr create \
+              --base dev \
+              --head release/versions \
+              --title "chore(release): Version packages" \
+              --body-file /tmp/version-pr-body.md
+          fi

@@ -2,5 +2,6 @@ packages:
   - 'apps/*'
   - 'packages/*'
 allowBuilds:
+  lefthook: true
   protobufjs: true
   unrs-resolver: true
