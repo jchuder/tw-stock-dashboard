@@ -4,6 +4,7 @@ import type { JSX } from 'react';
 import type { Market, StockQuoteProvider } from '@tw-stock-dashboard/contracts';
 import { toast } from 'sonner';
 import { fetchStockQuote, StockQuoteRequestError } from '../api/stock-quote.api.js';
+import { getMarketOverviewRefetchInterval } from '../../../shared/datetime/format-taipei.js';
 
 const FALLBACK_TOAST = 'Fugle 即時行情暫時無法使用，已自動切換至備援資料來源';
 const RECOVERY_TOAST = 'Fugle 行情服務已恢復，資料來源已切回 Fugle';
@@ -78,6 +79,9 @@ export function StockQuotePanel({
       return fetchStockQuote(requestedSymbol);
     },
     enabled: requestedSymbol !== null && requestedSymbol !== undefined,
+    // Poll the focus quote on the same trading-window schedule: 30s intraday
+    // so the header timestamp tracks the market; paused when closed.
+    refetchInterval: () => getMarketOverviewRefetchInterval(),
     retry: false,
   });
 
