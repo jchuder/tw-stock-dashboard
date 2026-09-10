@@ -57,7 +57,7 @@ jobs:
         run: |
           pr_number="$(gh pr list --base dev --head release/versions --state open --json number --jq '.[0].number // empty')"
           if [ -n "$pr_number" ]; then
-            gh pr close "$pr_number" --comment "Closing because dev has no pending changesets."
+            gh pr close "$pr_number" --comment "`dev` 目前沒有待處理的 Changeset，因此自動關閉此版本更新 PR。"
           fi
 
       - name: Build release plan
@@ -100,17 +100,19 @@ jobs:
         shell: bash
         run: |
           cat > /tmp/version-pr-body.md <<'EOF'
-          ## Version Packages
+          ## 版本更新
 
-          This PR is a rolling preview generated from all pending Changesets on `dev`.
+          此 PR 是根據 `dev` 上所有待處理 Changesets 自動產生的滾動版本規劃。
 
-          Keep it open while more work is still planned for the same release. Each new `dev` push with pending Changesets rebuilds `release/versions` from the latest `dev` and refreshes this PR.
+          如果本次 release 還會繼續合併其他開發內容，請保持此 PR 開啟。
+          每次 `dev` 出現新的待處理 Changesets 時，automation 都會從最新 `dev` 重建 `release/versions`，並更新此 PR。
 
-          Merge this PR into `dev` only when explicitly preparing/finalizing the next release candidate. After it is merged and the candidate is approved, open the `dev → main` release PR.
+          僅在明確準備並凍結下一次 release candidate 時，才將此 PR merge 回 `dev`。
+          Merge 後確認 release candidate 無誤，再建立 `dev → main` Release PR。
 
-          Do not add product changes to this branch.
+          請勿在 `release/versions` branch 加入產品功能或其他非版本管理變更。
 
-          ### Pending release plan
+          ### 待發布版本規劃
 
           ```text
           EOF
