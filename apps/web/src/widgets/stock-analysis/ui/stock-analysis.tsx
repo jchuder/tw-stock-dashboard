@@ -16,6 +16,7 @@ import {
   StockWatchlistPanel,
 } from '../../../features/stock-watchlist/index.js';
 import type { WatchlistDisplayItem } from '../../../features/stock-watchlist/index.js';
+import { getMarketOverviewRefetchInterval } from '../../../shared/datetime/format-taipei.js';
 
 function isIntradayRange(range: HistoryRange): boolean {
   return range === '1d' || range === '3d' || range === '5d';
@@ -99,7 +100,9 @@ export function StockAnalysis({
     queryKey: ['watchlist-quotes', watchlistQuerySymbols],
     queryFn: () => fetchStockQuoteBatches(watchlistSymbols),
     enabled: watchlistSymbols.length > 0,
-    refetchInterval: 15_000,
+    // Same trading-window schedule as Market Overview: 30s polls intraday,
+    // paused (wake at next 08:55) when closed to save upstream quota.
+    refetchInterval: () => getMarketOverviewRefetchInterval(),
     staleTime: 10_000,
     retry: false,
   });
