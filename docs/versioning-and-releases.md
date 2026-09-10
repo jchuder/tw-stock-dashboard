@@ -20,9 +20,9 @@ flowchart LR
   TAGS["Package Git Tags"]
 
   FEATURE -->|"開 PR"| FEATURE_PR
-  FEATURE_PR -->|"Rebase merge"| DEV
+  FEATURE_PR -->|"Merge commit"| DEV
   DEV -->|"自動建立 / 更新"| VERSION_PR
-  VERSION_PR -->|"Rebase merge"| READY
+  VERSION_PR -->|"release freeze 時 Merge commit"| READY
   READY -->|"開 PR"| RELEASE_PR
   RELEASE_PR -->|"Merge commit"| MAIN
   MAIN --> TAG_WF
@@ -41,15 +41,17 @@ flowchart LR
 
 ## PR merge policy
 
-本 repository 刻意依 target branch 使用不同 merge method：
+所有進入 protected branch 的人工 PR 統一使用 **Merge commit**，保留 reviewed PR boundary 與真實 ancestry；PR 內部仍保留整理過、可 trace 的 logical commits。
 
 | 流程 | Merge method | 原因 |
 | --- | --- | --- |
-| `feature/*` / `fix/* → dev` | Rebase merge only | 保留整理過、可 trace 的 logical commits，同時維持 `dev` 線性 history |
-| `release/versions → dev` | Rebase merge only | 保留 bot 產生的版本 commit，遵循所有 `dev` PR 的一致入口 |
+| `feature/*` / `fix/* → dev` | Merge commit only | 保留 reviewed PR boundary，同時保留 PR 內的 logical commits |
+| `release/versions → dev` | Merge commit only | 明確留下版本準備 PR 的 release boundary，便於 audit 版號與 CHANGELOG |
 | `dev → main` | Merge commit only | 保留 long-running `dev` 與 production `main` 的真實 release ancestry |
 | `hotfix/* → main` | Merge commit only | 清楚保留 production hotfix PR boundary 與 ancestry |
 | hotfix 後 `main → dev` | workflow `git merge --no-ff` | 自動回灌完整 production history；若衝突則停止並改走 dedicated sync PR |
+
+這個策略讓 `git log --first-parent dev` 可以直接閱讀每次 PR 進入 `dev` 的整合邊界，需要實作細節時再展開 merge commit 內的 logical commits。
 
 AI 開發與 review 過程可以產生多個 iterative commits，但這不代表 agent 可以自行 rewrite history。只有使用者明確要求整理、重建或重新 step 某個 branch 的 commits 時，才使用全域 `branch-commit-cleanup` skill；「準備開 PR」本身不會自動觸發 cleanup。
 
@@ -182,11 +184,11 @@ sequenceDiagram
 
   FEATURE->>FEATURE: implement + tests + pnpm changeset
   FEATURE-->>DEV: 開 Feature PR
-  FEATURE->>DEV: Rebase merge Feature PR
+  FEATURE->>DEV: Merge commit Feature PR
   DEV->>WF: push 觸發
   WF->>VERSION: changeset version + 更新版本檔
-  VERSION-->>DEV: 開啟 / 更新 Version Packages PR
-  VERSION->>DEV: Rebase merge Version Packages PR
+  VERSION-->>DEV: 建立 / 更新 rolling Version Packages PR
+  VERSION->>DEV: release freeze 時 Merge commit Version Packages PR
   DEV-->>MAIN: 開 Release PR
   DEV->>MAIN: Merge commit Release PR
 ```
@@ -225,7 +227,7 @@ Expose quote freshness metadata and migrate the dashboard consumer.
 Changeset 應該和這次實作一起 commit。
 **一般 feature branch 不要執行 `pnpm version:packages`。**
 
-branch Rebase merge 進 `dev` 後，`Version Packages` GitHub workflow 會收集目前所有 pending Changesets，並建立或更新由 bot 管理的 PR：
+branch 以 Merge commit 進 `dev` 後，`Version Packages` GitHub workflow 會收集目前所有 pending Changesets，並建立或更新由 bot 管理的 PR：
 
 ```text
 release/versions → dev
@@ -246,17 +248,33 @@ apps/web/CHANGELOG.md                updated
 workflow 使用官方的 `changeset version` 指令處理版本計算與檔案更新。
 GitHub Actions 只負責 branch 與 PR 的自動化流程，不自行實作 SemVer 判斷。
 
+### Version Packages PR 是 rolling release plan
+
+Version Packages PR 的存在不代表「現在就要升版 / release」。它表示：
+
+> 如果現在停止把新功能加入這一批 release，依目前 `dev` 上所有 pending Changesets，下一版會長這樣。
+
+因此使用方式是：
+
+1. `dev` 還要繼續累積同一批 release 的 feature / fix：**保持 Version Packages PR open**。
+2. 新的 Changeset merge 進 `dev`：workflow 以最新 `dev` 強制重建 `release/versions`，Changesets 重新聚合所有 pending bump，並更新同一個 open PR。
+3. 只有明確準備 / freeze 下一個 release candidate 時，才 review 該 PR 的 package version、CHANGELOG、internal dependency bump，並 merge 回 `dev`。
+4. Version Packages PR merge 後，pending Changesets 會被 consume，實際版號與 CHANGELOG 成為 `dev` 的 release candidate 狀態。
+5. release candidate 確認後，再開 `dev → main` Release PR；進 `main` 才觸發 package Git tags。
+
+例如目前 Web 已累積 `minor`，後續同一 release 又加入 Web patch，聚合結果仍會是該 baseline 的下一個 minor；若後續加入更高級別的 bump，Version Packages PR 會依所有 pending Changesets 重新計算。
+
 ### 準備一般 Release
 
 一般 release 流程如下：
 
-1. Review `release/versions → dev` PR。
+1. 在準備 freeze release 時 review `release/versions → dev` PR。
   - 確認各 package 的版本 bump。
   - 確認自動產生的 dependent bump 是否合理。
   - 確認 CHANGELOG。
   - 確認 internal dependency 更新。
-2. 將 Version Packages PR 以 **Rebase merge** 進 `dev`。
-3. 在 `dev` 執行既有 verification gates。
+2. 將 Version Packages PR 以 **Merge commit** 進 `dev`。
+3. 在 `dev` 執行既有 verification gates，確認這個已寫入版號的 release candidate。
 4. 明確決定要 release 時，開啟 `dev → main` Release PR；`main` 的 commitlint、quality、E2E 與 Strict up-to-date gate 全部通過後，使用 **Merge commit** merge。
 5. 如果這次 `main` 更新包含 workspace `package.json#version` 變更：
   - `Release Tags` workflow 會執行 `changeset git-tag`。
@@ -358,7 +376,7 @@ pnpm install --lockfile-only
 
 Hotfix PR merge 進 `main` 後，`Sync Main to Dev` workflow 會自動驗證 PR 已 merge、base 是 `main`、head 是同 repository 的 `hotfix/*`，再以 repository-scoped GitHub App 執行 hard-coded `main → dev` clean back-merge。
 
-workflow 會先在 runner 建立 merge result，執行 commitlint、lint、typecheck 與 deterministic tests；全部通過才 direct push `dev`。若 `main` 已存在於 `dev` 則 no-op；若有 merge conflict 則直接失敗，不自行解衝突。衝突必須改用 dedicated sync branch 解決並走一般 PR 到 `dev`，該 PR 使用 **Rebase merge**。無參數的 `workflow_dispatch` 只作為相同 `main → dev` 動作的 recovery fallback。
+workflow 會先在 runner 建立 merge result，執行 commitlint、lint、typecheck 與 deterministic tests；全部通過才 direct push `dev`。若 `main` 已存在於 `dev` 則 no-op；若有 merge conflict 則直接失敗，不自行解衝突。衝突必須改用 dedicated sync branch 解決並走一般 PR 到 `dev`，該 PR使用 **Merge commit**。無參數的 `workflow_dispatch` 只作為相同 `main → dev` 動作的 recovery fallback。
 
 不要只 cherry-pick bug-fix commit。
 `dev` 必須一起拿到：
@@ -398,7 +416,8 @@ workflow 會先在 runner 建立 merge result，執行 commitlint、lint、typec
 6. 建立或更新 Version Packages PR。
 
 `release/versions` 是由 bot 管理的 branch，而且每次都會依最新 `dev` 強制重建。
-不要在這個 branch 上放任何產品開發內容。
+只要還有 pending Changesets，open Version Packages PR 就作為 rolling release-plan preview 持續更新；沒有 pending Changesets 時 workflow 會關閉 stale version PR。
+不要在這個 branch 上放任何產品開發內容，也不要因為 PR 自動出現就自動 merge。
 
 ### `.github/workflows/release-tags.yml`
 
@@ -466,6 +485,11 @@ pnpm changeset:status
 ```
 
 純文件、測試或沒有 releasable behavior change 的內部修改，可以刻意不建立 Changeset。
+
+### Version Packages PR 出現後要立即 merge 嗎？
+
+不要。只要 `dev` 還要繼續累積同一個 release 的內容，就讓 PR 保持 open。
+每次新的 pending Changeset 進 `dev`，automation 都會重新產生目前的聚合 release plan。只有明確準備 / freeze release candidate 時才 merge Version Packages PR。
 
 ### Version Packages workflow 在 `changeset status` 失敗
 

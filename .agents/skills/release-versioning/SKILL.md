@@ -34,10 +34,14 @@ The global commit skill still requires `!` plus a `BREAKING CHANGE:` footer for 
 4. Write a user-facing summary describing observable behavior or migration impact.
 5. Commit the generated `.changeset/*.md` with the implementation it describes.
 6. Do **not** run `pnpm version:packages` on a normal feature branch.
-7. Open a PR to `dev`. PR CI must pass `pr-commitlint` and `pr-quality`; merge into `dev` using **Rebase merge** only.
-8. `.github/workflows/version-packages.yml` regenerates the App-owned `release/versions` PR from pending Changesets and required internal-dependent bumps.
-9. When preparing a release, review and **Rebase merge** `release/versions → dev`, then open a `dev → main` release PR only with explicit user release approval. `main` also requires `pr-e2e` and an up-to-date branch; merge the release PR using **Merge commit** only.
-10. When workspace package versions change on `main`, `.github/workflows/release-tags.yml` creates and pushes only those package tags.
+7. Open a PR to `dev`. PR CI must pass `pr-commitlint` and `pr-quality`; merge into `dev` using **Merge commit** only so the reviewed PR boundary remains visible while logical commits are preserved inside it.
+8. `.github/workflows/version-packages.yml` regenerates the App-owned `release/versions` PR from all pending Changesets and required internal-dependent bumps.
+9. Treat the open `release/versions → dev` PR as a rolling release-plan preview. While more work for the same release is still entering `dev`, leave it open; each new `dev` push with pending Changesets rebuilds `release/versions` from the latest `dev` and updates the PR.
+10. Only when explicitly preparing/finalizing the next release candidate, review and **Merge commit** `release/versions → dev`. This consumes the pending Changesets into package versions and changelogs on `dev`.
+11. After that version PR is merged and the release candidate is approved, open a `dev → main` release PR. `main` requires `pr-commitlint`, `pr-quality`, `pr-e2e` and an up-to-date branch; merge the release PR using **Merge commit** only.
+12. When workspace package versions change on `main`, `.github/workflows/release-tags.yml` creates and pushes only those package tags.
+
+Do not merge a Version Packages PR merely because automation opened or refreshed it. Its existence means "this is what the next release would be if frozen now," not "release now."
 
 Commit-history cleanup is not a release prerequisite and must never be inferred from PR preparation. If the user explicitly asks to reconstruct a branch into clean logical commits, use the global `branch-commit-cleanup` skill before the PR workflow; otherwise preserve the branch history as-is.
 
@@ -55,14 +59,14 @@ Use this only when the fix must ship before the next normal `dev` release.
 5. Review the generated package versions, changelogs and lockfile. The hotfix PR to `main` must already contain its final version bump because normal Version Packages automation runs on `dev`, not `main`.
 6. Open `hotfix/* → main`; `pr-commitlint`, `pr-quality`, `pr-e2e` and the main Strict up-to-date policy must pass. Merge using **Merge commit** only.
 7. After the hotfix PR merges, `.github/workflows/main-to-dev-sync.yml` automatically performs a hard-coded `main → dev` clean back-merge using the repository automation GitHub App. It runs commitlint plus lint/typecheck/test before pushing.
-8. If `main → dev` conflicts, the workflow must fail without resolving. Resolve the conflict on a dedicated sync branch and return through a normal PR to `dev`; that PR uses **Rebase merge** like every other PR entry to `dev`.
+8. If `main → dev` conflicts, the workflow must fail without resolving. Resolve the conflict on a dedicated sync branch and return through a normal PR to `dev`; that PR uses **Merge commit** like every other PR entry to `dev`.
 9. Confirm the existing `release/versions` PR is regenerated from the new `dev` baseline if pending normal Changesets remain.
 
 ## Repository protection
 
 - Normal human/agent identities never direct-push `dev` or `main`.
 - `protected-branch-integrity` targets both branches and exclusively owns deletion and force-push protection; it has no bypass actor.
-- `dev` allows PR entry by **Rebase merge only**, requires `pr-commitlint` and `pr-quality`, and uses Loose up-to-date policy.
+- `dev` allows PR entry by **Merge commit only**, requires `pr-commitlint` and `pr-quality`, and uses Loose up-to-date policy.
 - `main` allows PR entry by **Merge commit only**, requires `pr-commitlint`, `pr-quality`, `pr-e2e`, and uses Strict up-to-date policy.
 - `main` has no bypass actor; every release and hotfix enters through a PR.
 - The repository automation GitHub App is the only bypass actor for the `dev` PR-entry ruleset, solely to support the controlled hotfix back-merge workflow.
@@ -79,6 +83,7 @@ Use this only when the fix must ship before the next normal `dev` release.
 
 - Never publish these private packages to npm as part of this workflow.
 - Never manually edit package versions for ordinary features or fixes; use Changesets.
+- Never merge an open Version Packages PR until the user explicitly decides to prepare/finalize that release candidate.
 - Never merge unreleased `dev` work into an emergency hotfix.
 - Never use a human/admin bypass to simulate the automation App.
 - Never let privileged automation resolve a `main → dev` merge conflict automatically.

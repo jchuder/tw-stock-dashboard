@@ -41,10 +41,20 @@ AUTOMATION_APP_CLIENT_ID=<GitHub App Client ID>
 ### Actions secret
 
 ```text
-AUTOMATION_APP_PRIVATE_KEY=<GitHub App private key PEM>
+AUTOMATION_APP_PRIVATE_KEY=<完整 GitHub App private key PEM>
 ```
 
 位置：**Settings → Secrets and variables → Actions → Secrets**。
+
+Secret 必須保存完整 PEM，包括開頭與結尾，例如：
+
+```text
+-----BEGIN RSA PRIVATE KEY-----
+...
+-----END RSA PRIVATE KEY-----
+```
+
+或 GitHub 實際產生的 `BEGIN PRIVATE KEY` / `END PRIVATE KEY` 格式。不要只貼中間的 key body；完整 multiline PEM 可直接貼入 Secret。
 
 workflow 使用官方 `actions/create-github-app-token`，token scope 只涵蓋目前 repository，並在 job 結束時自動 revoke。
 
@@ -104,7 +114,7 @@ dev
 啟用：
 
 - Require a pull request before merging。
-- Allowed merge methods：**Rebase merge only**。
+- Allowed merge methods：**Merge commit only**。
 - Required approvals：0。
 - Require conversation resolution before merging。
 - Require status checks to pass：
@@ -116,6 +126,8 @@ dev
 Bypass actor：只加入 `tw-stock-dashboard-automation` GitHub App，使用 Always allow。
 
 這個 bypass 只用於 `.github/workflows/main-to-dev-sync.yml` 的受控 direct back-merge。一般人類與使用人類 Git credentials 的 AI agent 都不能直接 push `dev`。
+
+`dev` 使用 Merge commit 是為了在 Git graph 與 `git log --first-parent dev` 中保留每個 reviewed PR 的整合邊界；PR 內的 logical commits 仍完整保留。若 iterative AI history 需要整理，必須由使用者明確觸發 `branch-commit-cleanup`，不能用 merge method 取代 history cleanup。
 
 ## 6. 建立 main-entry Ruleset
 
@@ -142,7 +154,24 @@ Bypass actors：**none**。
 
 因此正常 release 必須走 `dev → main` PR；production hotfix 必須走 `hotfix/* → main` PR，而且兩者都以 Merge commit 進入 `main`。即使 automation App 也不能 direct push `main`。
 
-## 7. Hotfix back-merge automation
+## 7. Version Packages PR 的使用方式
+
+只要 `dev` 上存在 pending `.changeset/*.md`，`Version Packages` workflow 就會建立或更新：
+
+```text
+release/versions → dev
+```
+
+這個 PR 是 **rolling release-plan preview**，不是「一出現就要 merge」的 PR。
+
+- `dev` 還要繼續累積同一批 release 的功能 / fix：保持 Version Packages PR open。
+- 新的 Changeset merge 進 `dev`：workflow 會從最新 `dev` 重建 `release/versions`，重新計算聚合後的 bump，並更新同一個 open PR。
+- 明確準備 / freeze 下一個 release candidate：review 版號、CHANGELOG、internal dependency bump 後，才以 **Merge commit** merge `release/versions → dev`。
+- Version Packages PR merge 後，pending Changesets 已被 consume 成實際 `package.json#version` 與 CHANGELOG；確認 release candidate 後再開 `dev → main` Release PR。
+
+因此 automation 開出 Version Packages PR 只表示：「如果現在 freeze，下一版會長這樣。」它不代表 automation 已決定要 release。
+
+## 8. Hotfix back-merge automation
 
 `Sync Main to Dev` 只會在以下情況自動執行：
 
@@ -161,16 +190,17 @@ main → dev
 
 workflow 不接受 branch inputs，也不 force push。它先在 runner 建立真正的 `git merge --no-ff` result，再執行 commitlint、lint、typecheck 與 deterministic tests；全部通過才 push `dev`。
 
-若 `main` 已包含在 `dev` 中則 no-op。若發生 merge conflict，workflow 直接失敗，不自行解衝突；改由 dedicated sync branch 解衝突並走一般 PR 回 `dev`，該 PR 仍遵循 `dev` 的 Rebase merge policy。
+若 `main` 已包含在 `dev` 中則 no-op。若發生 merge conflict，workflow 直接失敗，不自行解衝突；改由 dedicated sync branch 解衝突並走一般 PR 回 `dev`，該 PR同樣使用 **Merge commit**。
 
 `workflow_dispatch` 保留為無參數 recovery fallback，只能重新執行同一個 `main → dev` 動作。
 
-## 8. 建議啟用順序
+## 9. 建議啟用與驗證順序
 
 1. 先建立並安裝 GitHub App。
-2. 設定 `AUTOMATION_APP_CLIENT_ID` 與 `AUTOMATION_APP_PRIVATE_KEY`。
+2. 設定 `AUTOMATION_APP_CLIENT_ID` 與完整 `AUTOMATION_APP_PRIVATE_KEY` PEM。
 3. 讓 `PR CI` 至少成功跑過一次，使 required check 名稱可在 GitHub 設定中選取。
 4. 建立 `protected-branch-integrity`、`dev-entry`、`main-entry` Rulesets。
-5. 用一般 feature PR 驗證 `dev` 無法 direct push、只能 Rebase merge，且 required checks 生效。
-6. 用 release / hotfix PR 驗證 `main` 只能 Merge commit，且 Strict + E2E gate 生效。
-7. 下一次真正 hotfix 時驗證 `hotfix/* → main → dev` 自動回灌；不要為了測試而製造假的 production hotfix。
+5. 用一般 feature PR 驗證 `dev` 無法 direct push、只能 Merge commit，且 required checks 生效。
+6. 讓一個含 Changeset 的 PR 進 `dev`，確認 Version Packages workflow 能建立 / 更新 `release/versions → dev` PR；在尚未準備 release 時保持該 PR open。
+7. 準備 release 時 merge Version Packages PR，再用 release PR 驗證 `main` 只能 Merge commit，且 Strict + E2E gate 生效。
+8. 下一次真正 hotfix 時驗證 `hotfix/* → main → dev` 自動回灌；不要為了測試而製造假的 production hotfix。

@@ -102,9 +102,11 @@ jobs:
           cat > /tmp/version-pr-body.md <<'EOF'
           ## Version Packages
 
-          This PR is generated from pending Changesets on `dev`.
+          This PR is a rolling preview generated from all pending Changesets on `dev`.
 
-          Review the package version bumps and changelogs. Merge this PR into `dev` when the release candidate is ready; then open and merge a `dev → main` release PR only when releasing.
+          Keep it open while more work is still planned for the same release. Each new `dev` push with pending Changesets rebuilds `release/versions` from the latest `dev` and refreshes this PR.
+
+          Merge this PR into `dev` only when explicitly preparing/finalizing the next release candidate. After it is merged and the candidate is approved, open the `dev → main` release PR.
 
           Do not add product changes to this branch.
 
