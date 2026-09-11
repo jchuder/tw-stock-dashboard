@@ -7,6 +7,26 @@ import { CacheModule } from '../../libs/cache/cache.module.js';
 import { UniverseModule } from '../../libs/securities/universe.module.js';
 import { StockHistoryModule } from './stock-history.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
+import { StockHistoryCacheError } from './fugle-history.error.js';
+import { OfficialDailyHistoryProvider } from './official-daily-history.provider.js';
+import { Effect } from 'effect';
+
+import { acquireProjectRedisMutex, flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
+
+let releaseProjectRedis: (() => Promise<void>) | null = null;
+
+beforeEach(async () => {
+  releaseProjectRedis = await acquireProjectRedisMutex();
+  await flushProjectRedisKeys();
+});
+
+afterEach(async () => {
+  const release = releaseProjectRedis;
+  releaseProjectRedis = null;
+  if (release) {
+    await release();
+  }
+});
 
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
   return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
@@ -77,11 +97,12 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
   });
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(FIXED_NOW);
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -586,5 +607,19 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
     expect(res.body.source.provider).toBe('twse');
     const fugleCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes('api.fugle.tw'));
     expect(fugleCalls.length).toBe(0);
+  });
+
+  it('maps history cache errors (StockHistoryCacheError) to HTTP 503', async () => {
+    const officialHistoryProvider = app.get(OfficialDailyHistoryProvider);
+    vi.spyOn(officialHistoryProvider, 'getDailyHistory').mockReturnValue(
+      Effect.fail(new StockHistoryCacheError()),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/history?range=1m').expect(503);
+
+    expect(res.body).toMatchObject({
+      statusCode: 503,
+      message: 'Market data cache temporarily unavailable',
+    });
   });
 });

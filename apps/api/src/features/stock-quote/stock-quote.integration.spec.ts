@@ -9,7 +9,30 @@ import { CacheModule } from '../../libs/cache/cache.module.js';
 import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { UniverseModule } from '../../libs/securities/universe.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
-import { TPEX_DAILY_QUOTE_URL, TWSE_DAILY_QUOTE_URL } from './official-daily-quote.provider.js';
+import { TPEX_DAILY_QUOTE_URL, TWSE_DAILY_QUOTE_URL, OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
+import { OfficialDailyQuoteError } from './official-daily-quote.error.js';
+import { TpexEsbCacheError } from './tpex-esb-quote.error.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import { RedisConnectionError } from '../../libs/cache/redis.error.js';
+import { WindowCoordinationTimeoutError } from '../../libs/cache/window-cache.error.js';
+import { Effect } from 'effect';
+
+import { acquireProjectRedisMutex, flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
+
+let releaseProjectRedis: (() => Promise<void>) | null = null;
+
+beforeEach(async () => {
+  releaseProjectRedis = await acquireProjectRedisMutex();
+  await flushProjectRedisKeys();
+});
+
+afterEach(async () => {
+  const release = releaseProjectRedis;
+  releaseProjectRedis = null;
+  if (release) {
+    await release();
+  }
+});
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
   return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
 }
@@ -164,6 +187,7 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -663,6 +687,104 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
     expect(res.body).toMatchObject({
       statusCode: 400,
       message: 'symbols query is required',
+    });
+  });
+
+  it('maps official quote cache errors to HTTP 503', async () => {
+    const officialProvider = app.get(OfficialDailyQuoteProvider);
+    vi.spyOn(officialProvider, 'getQuote').mockReturnValue(
+      Effect.fail(new OfficialDailyQuoteError({ market: 'TWSE', stage: 'cache' })),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(503);
+
+    expect(res.body).toMatchObject({
+      statusCode: 503,
+      message: 'Market data cache temporarily unavailable',
+    });
+  });
+
+  it('maps ESB quote cache errors (TpexEsbCacheError) to HTTP 503', async () => {
+    const esbProvider = app.get(TpexEsbQuoteProvider);
+    vi.spyOn(esbProvider, 'getQuote').mockReturnValue(
+      Effect.fail(new TpexEsbCacheError()),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/7883/quote').expect(503);
+
+    expect(res.body).toMatchObject({
+      statusCode: 503,
+      message: 'Market data cache temporarily unavailable',
+    });
+  });
+
+  it('maps global Redis outage to HTTP 503 for the entire batch', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const quoteCache = app.get(StockQuoteCache);
+    vi.spyOn(quoteCache, 'getOrLoad').mockReturnValue(
+      Effect.fail(new RedisConnectionError('ECONNREFUSED')),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,7883' })
+      .expect(503);
+
+    expect(res.body).toMatchObject({
+      statusCode: 503,
+      message: 'Market data cache temporarily unavailable',
+    });
+  });
+
+  it('isolates per-symbol coordination failure in batch to item error unavailable with HTTP 200', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const esbProvider = app.get(TpexEsbQuoteProvider);
+    vi.spyOn(esbProvider, 'getQuote').mockReturnValue(
+      Effect.fail(new TpexEsbCacheError()),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,7883' })
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0]).toMatchObject({
+      symbol: '2330',
+      error: null,
+    });
+    expect(res.body.items[1]).toEqual({
+      symbol: '7883',
+      quote: null,
+      error: 'unavailable',
+    });
+  });
+
+  it('isolates per-symbol WindowCoordinationTimeoutError in batch to item error unavailable with HTTP 200', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const quoteCache = app.get(StockQuoteCache);
+    const originalGetOrLoad = quoteCache.getOrLoad.bind(quoteCache);
+    vi.spyOn(quoteCache, 'getOrLoad').mockImplementation((params) => {
+      if (params.symbol === '2317') {
+        return Effect.fail(new WindowCoordinationTimeoutError('key:2317', 10500));
+      }
+      return originalGetOrLoad(params);
+    });
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,2317' })
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0]).toMatchObject({
+      symbol: '2330',
+      error: null,
+    });
+    expect(res.body.items[1]).toEqual({
+      symbol: '2317',
+      quote: null,
+      error: 'unavailable',
     });
   });
 });

@@ -34,7 +34,20 @@ export class StockQuoteController {
   @Get('quotes')
   async getQuotes(@Query('symbols') rawSymbols?: string): Promise<StockQuoteBatchResponse> {
     const symbols = parseSymbols(rawSymbols);
-    return Effect.runPromise(this.stockQuoteService.getQuotes(symbols));
+    const result = await Effect.runPromise(Effect.either(this.stockQuoteService.getQuotes(symbols)));
+    if (Either.isLeft(result)) {
+      if (
+        result.left._tag === 'RedisCommandError' ||
+        result.left._tag === 'RedisConnectionError'
+      ) {
+        throw new ServiceUnavailableException('Market data cache temporarily unavailable');
+      }
+      if (result.left._tag === 'UniverseUnavailableError') {
+        throw new ServiceUnavailableException('Security universe temporarily unavailable');
+      }
+      throw new InternalServerErrorException('Failed to fetch stock quotes');
+    }
+    return result.right;
   }
 
   @Get(':symbol/quote')
@@ -46,6 +59,15 @@ export class StockQuoteController {
       }
       if (result.left._tag === 'UniverseUnavailableError') {
         throw new ServiceUnavailableException('Security universe temporarily unavailable');
+      }
+      if (
+        result.left._tag === 'RedisCommandError' ||
+        result.left._tag === 'RedisConnectionError' ||
+        result.left._tag === 'WindowCoordinationTimeoutError' ||
+        result.left._tag === 'TpexEsbCacheError' ||
+        (result.left._tag === 'OfficialDailyQuoteError' && result.left.stage === 'cache')
+      ) {
+        throw new ServiceUnavailableException('Market data cache temporarily unavailable');
       }
       const failure = failedLog(symbol, result.left);
       this.logger.error(failure);

@@ -1,22 +1,40 @@
 import { Effect, Either, Fiber, TestClock, TestContext } from 'effect';
 import type { PinoLogger } from 'nestjs-pino';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import type { Security, StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import { CacheService } from '../../libs/cache/cache.service.js';
-import type { FugleQuoteError } from './fugle-quote.error.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
-import type { OfficialDailyQuoteError } from './official-daily-quote.error.js';
 import { OfficialDailyQuoteProvider, TPEX_DAILY_QUOTE_URL, TWSE_DAILY_QUOTE_URL } from './official-daily-quote.provider.js';
+import { OFFICIAL_QUOTE_POLICY, officialQuoteKey } from '../../libs/cache/window-cache.policies.js';
 import { StockNotFoundError } from '../../libs/securities/universe.error.js';
-import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 import type { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import { StockQuoteCache } from './stock-quote.cache.js';
-import { StockQuoteService } from './stock-quote.service.js';
-import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
+import { StockQuoteService, type StockQuoteFailure } from './stock-quote.service.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
-import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
+
+import {
+  acquireProjectRedisMutex,
+  createTestCacheService,
+  flushProjectRedisKeys,
+} from '../../libs/cache/cache-test.helper.js';
+
+let releaseProjectRedis: (() => Promise<void>) | null = null;
+
+beforeEach(async () => {
+  releaseProjectRedis = await acquireProjectRedisMutex();
+  await flushProjectRedisKeys();
+});
+
+afterEach(async () => {
+  const release = releaseProjectRedis;
+  releaseProjectRedis = null;
+  if (release) {
+    await release();
+  }
+});
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
 const OFFICIAL_TWSE_BODY = [
@@ -61,15 +79,7 @@ const EXPECTED_QUOTE = {
   limitUpPrice: null,
   limitDownPrice: null,
 };
-type QuoteResult = Either.Either<
-  StockQuoteResponse,
-  FugleQuoteError |
-    TwseMisQuoteError |
-    OfficialDailyQuoteError |
-    TpexEsbQuoteError |
-    StockNotFoundError |
-    UniverseUnavailableError
->;
+type QuoteResult = Either.Either<StockQuoteResponse, StockQuoteFailure>;
 
 interface ExpectedSource {
   provider: 'fugle' | 'twse-mis' | 'twse-openapi' | 'tpex-openapi' | 'tpex-esb';
@@ -92,13 +102,19 @@ function silentLogger(): PinoLogger {
   return { info: () => {}, warn: () => {}, error: () => {} } as unknown as PinoLogger;
 }
 
-function service() {
+let testCache: CacheService;
+
+beforeAll(async () => {
+  testCache = await createTestCacheService();
+});
+
+function service(cache: CacheService = testCache) {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
-    new OfficialDailyQuoteProvider(new CacheService()),
-    new TpexEsbQuoteProvider(new CacheService()),
-    new StockQuoteCache(),
+    new OfficialDailyQuoteProvider(new WindowCacheService(cache)),
+    new TpexEsbQuoteProvider(new WindowCacheService(cache)),
+    new StockQuoteCache(new WindowCacheService(cache)),
     fakeUniverse(),
     silentLogger(),
   );
@@ -136,10 +152,15 @@ describe('StockQuoteService timeout orchestration', () => {
 
   it('falls back to MIS when Fugle hangs past 3s', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    let markStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: unknown) => {
         if (String(input).includes('api.fugle.tw')) {
+          markStarted();
           return new Promise<Response>(() => {});
         }
         return new Response(JSON.stringify(MIS_BODY), { status: 200 });
@@ -149,6 +170,7 @@ describe('StockQuoteService timeout orchestration', () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const fiber = yield* Effect.fork(Effect.either(service().getQuote('2330')));
+        yield* Effect.promise(() => fetchStarted);
         yield* TestClock.adjust('3 seconds');
         return yield* Fiber.join(fiber);
       }).pipe(Effect.provide(TestContext.TestContext)),
@@ -213,7 +235,7 @@ describe('StockQuoteService TTL cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('refetches once TTL expires at exactly 5s', async () => {
+  it('refetches once window expires at 30s', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(FUGLE_BODY), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -222,7 +244,7 @@ describe('StockQuoteService TTL cache', () => {
     const [first, second] = await Effect.runPromise(
       Effect.gen(function* () {
         const r1 = yield* Effect.either(svc.getQuote('2330'));
-        yield* TestClock.adjust(5000);
+        yield* TestClock.adjust('30 seconds');
         const r2 = yield* Effect.either(svc.getQuote('2330'));
         return [r1, r2] as const;
       }).pipe(Effect.provide(TestContext.TestContext)),
@@ -322,10 +344,15 @@ describe('StockQuoteService TTL cache', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
   });
 
-  it('starts TTL at cache insertion, not request start', async () => {
+  it('assigns window at cache insertion, not request start', async () => {
     vi.stubEnv('FUGLE_API_KEY', 'test-api-key');
+    let markStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     const fetchMock = vi.fn(async (input: unknown) => {
       if (String(input).includes('api.fugle.tw')) {
+        markStarted();
         return new Promise<Response>(() => {});
       }
       return new Response(JSON.stringify(MIS_BODY), { status: 200 });
@@ -333,11 +360,14 @@ describe('StockQuoteService TTL cache', () => {
     vi.stubGlobal('fetch', fetchMock);
     const svc = service();
 
-    // t=0 request, +3s Fugle timeout, MIS immediate success (cached at t=3s),
-    // +4s second request: total t=7s, but only 4s after insertion -> HIT.
+    // t=28s request starts in window 0.
+    // +3s Fugle timeout -> MIS immediate success cached at t=31s (window 1).
+    // +4s second request at t=35s (window 1): HIT because window was decided at completion instant.
     const [first, second] = await Effect.runPromise(
       Effect.gen(function* () {
+        yield* TestClock.setTime(28000);
         const f1 = yield* Effect.fork(Effect.either(svc.getQuote('2330')));
+        yield* Effect.promise(() => fetchStarted);
         yield* TestClock.adjust('3 seconds');
         const r1 = yield* Fiber.join(f1);
         yield* TestClock.adjust('4 seconds');
@@ -732,18 +762,30 @@ describe('StockQuoteService Public Data closed-session freshness', () => {
       throw new Error(`unexpected upstream call: ${String(input)}`);
     });
     vi.stubGlobal('fetch', fetchMock);
+    const staleWindow = Math.floor(OVERNIGHT_0909 / OFFICIAL_QUOTE_POLICY.windowMs);
     const staleCache = {
       getJson: (key: string) =>
-        Effect.succeed(key === 'official-quote:twse:v1' ? OFFICIAL_0907_BODY : null),
+        Effect.succeed(
+          key === officialQuoteKey('TWSE')
+            ? {
+                version: 1 as const,
+                windowId: staleWindow,
+                storedAt: new Date(OVERNIGHT_0909).toISOString(),
+                value: OFFICIAL_0907_BODY,
+              }
+            : null,
+        ),
       setJson: () => Effect.succeed(undefined),
       del: () => Effect.succeed(undefined),
+      setNxPx: () => Effect.succeed(true),
+      releaseLockIfOwner: () => Effect.succeed(1),
     };
     const svc = new StockQuoteService(
       new FugleQuoteProvider(),
       new TwseMisQuoteProvider(),
-      new OfficialDailyQuoteProvider(staleCache as unknown as CacheService),
-      new TpexEsbQuoteProvider(new CacheService()),
-      new StockQuoteCache(),
+      new OfficialDailyQuoteProvider(new WindowCacheService(staleCache as unknown as CacheService)),
+      new TpexEsbQuoteProvider(new WindowCacheService(testCache)),
+      new StockQuoteCache(new WindowCacheService(testCache)),
       fakeUniverse(),
       silentLogger(),
     );
