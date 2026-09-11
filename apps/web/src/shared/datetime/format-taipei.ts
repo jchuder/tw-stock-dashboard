@@ -40,7 +40,12 @@ export function formatTaipeiTime(iso: string): string {
 }
 
 const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
-export const ACTIVE_POLLING_INTERVAL_MS = 30_000;
+
+// Deliberately asymmetric polling policy: the single focus quote refreshes
+// fast while multi-symbol / index queries stay on the standard cadence, so
+// free-tier Fugle quota (60 intraday calls/min) keeps headroom for bursts.
+export const FOCUS_QUOTE_POLLING_INTERVAL_MS = 15_000;
+export const STANDARD_POLLING_INTERVAL_MS = 30_000;
 
 /**
  * Checks if the given time falls into the regular weekday trading window
@@ -48,7 +53,7 @@ export const ACTIVE_POLLING_INTERVAL_MS = 30_000;
  *
  * Market timing rules:
  * - 正常 13:30 收盤；極端情況可能因暫緩收盤延至 13:33，系統保守至 13:35 才將 MIS 快照視為 final close。
- * - 08:55:00 開始至 13:35:00 維持 30 秒即時輪詢。
+ * - 08:55:00 開始至 13:35:00 維持主動輪詢（間隔由各查詢的 policy 決定）。
  * - Note: This represents the regular weekly market window and does not
  *   account for official TWSE national holiday closures or special trading days.
  */
@@ -70,14 +75,14 @@ export function isTaipeiTradingWindow(now = new Date()): boolean {
 }
 
 /**
- * Calculates the next refetch interval for market overview.
- * - During trading window (Mon-Fri 08:55 ~ 13:35): returns 30,000 ms.
+ * Calculates the next refetch interval for a trading-window query.
+ * - During trading window (Mon-Fri 08:55 ~ 13:35): returns activeIntervalMs.
  * - Outside trading window: returns the delay until the next 08:55:00 trading window wake-up.
  *   This ensures long-lived open tabs automatically wake up and begin active polling at 08:55.
  */
-export function getMarketOverviewRefetchInterval(now = new Date()): number {
+export function getTradingWindowRefetchInterval(activeIntervalMs: number, now = new Date()): number {
   if (isTaipeiTradingWindow(now)) {
-    return ACTIVE_POLLING_INTERVAL_MS;
+    return activeIntervalMs;
   }
 
   const nowMs = now.getTime();
@@ -112,4 +117,16 @@ export function getMarketOverviewRefetchInterval(now = new Date()): number {
   const targetDate = new Date(Date.UTC(year, month, date + daysUntilNext, 8, 55, 0, 0) - TAIPEI_OFFSET_MS);
   const diffMs = targetDate.getTime() - nowMs;
   return Math.max(1000, diffMs + 200);
+}
+
+export function getMarketOverviewRefetchInterval(now = new Date()): number {
+  return getTradingWindowRefetchInterval(STANDARD_POLLING_INTERVAL_MS, now);
+}
+
+export function getWatchlistRefetchInterval(now = new Date()): number {
+  return getTradingWindowRefetchInterval(STANDARD_POLLING_INTERVAL_MS, now);
+}
+
+export function getFocusQuoteRefetchInterval(now = new Date()): number {
+  return getTradingWindowRefetchInterval(FOCUS_QUOTE_POLLING_INTERVAL_MS, now);
 }

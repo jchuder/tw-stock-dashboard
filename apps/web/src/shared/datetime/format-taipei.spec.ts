@@ -3,7 +3,12 @@ import {
   formatTaipeiDate,
   formatTaipeiDateTime,
   formatTaipeiTime,
+  FOCUS_QUOTE_POLLING_INTERVAL_MS,
+  STANDARD_POLLING_INTERVAL_MS,
+  getFocusQuoteRefetchInterval,
   getMarketOverviewRefetchInterval,
+  getTradingWindowRefetchInterval,
+  getWatchlistRefetchInterval,
   isTaipeiTradingWindow,
 } from './format-taipei.js';
 
@@ -88,6 +93,37 @@ describe('format-taipei', () => {
       const interval = getMarketOverviewRefetchInterval(weekendSat);
       expect(interval).toBeGreaterThan(46 * 3600 * 1000);
       expect(interval).toBeLessThan(47 * 3600 * 1000);
+    });
+  });
+
+  describe('per-query trading-window schedules', () => {
+    // Mon 10:30 (intraday): each query returns its own active interval.
+    const intradayNow = new Date('2026-09-07T10:30:00+08:00');
+
+    it('polls the focus quote every 15s intraday', () => {
+      expect(FOCUS_QUOTE_POLLING_INTERVAL_MS).toBe(15_000);
+      expect(getFocusQuoteRefetchInterval(intradayNow)).toBe(15_000);
+    });
+
+    it('keeps watchlist and overview on the 30s standard cadence intraday', () => {
+      expect(STANDARD_POLLING_INTERVAL_MS).toBe(30_000);
+      expect(getWatchlistRefetchInterval(intradayNow)).toBe(30_000);
+      expect(getMarketOverviewRefetchInterval(intradayNow)).toBe(30_000);
+    });
+
+    it('wakes all queries at the next 08:55 regardless of interval', () => {
+      // Mon 14:00 -> Tue 08:55 for every schedule.
+      const afterHours = new Date('2026-09-07T14:00:00+08:00');
+      for (const getInterval of [getFocusQuoteRefetchInterval, getWatchlistRefetchInterval]) {
+        const interval = getInterval(afterHours);
+        expect(interval).toBeGreaterThan(18 * 3600 * 1000);
+        expect(interval).toBeLessThan(19 * 3600 * 1000);
+      }
+    });
+
+    it('delegates custom intervals through the shared window logic', () => {
+      expect(getTradingWindowRefetchInterval(15_000, intradayNow)).toBe(15_000);
+      expect(getTradingWindowRefetchInterval(60_000, intradayNow)).toBe(60_000);
     });
   });
 });

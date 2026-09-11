@@ -16,7 +16,7 @@ import {
   StockWatchlistPanel,
 } from '../../../features/stock-watchlist/index.js';
 import type { WatchlistDisplayItem } from '../../../features/stock-watchlist/index.js';
-import { getMarketOverviewRefetchInterval } from '../../../shared/datetime/format-taipei.js';
+import { STANDARD_POLLING_INTERVAL_MS, getWatchlistRefetchInterval } from '../../../shared/datetime/format-taipei.js';
 
 function isIntradayRange(range: HistoryRange): boolean {
   return range === '1d' || range === '3d' || range === '5d';
@@ -100,10 +100,11 @@ export function StockAnalysis({
     queryKey: ['watchlist-quotes', watchlistQuerySymbols],
     queryFn: () => fetchStockQuoteBatches(watchlistSymbols),
     enabled: watchlistSymbols.length > 0,
-    // Same trading-window schedule as Market Overview: 30s polls intraday,
-    // paused (wake at next 08:55) when closed to save upstream quota.
-    refetchInterval: () => getMarketOverviewRefetchInterval(),
-    staleTime: 10_000,
+    // 30s polls intraday, paused (wake at next 08:55) when closed.
+    // staleTime matches the interval: no extra batch refetch on refocus
+    // inside a fresh window (6 symbols = 12 calls per avoidable burst).
+    refetchInterval: () => getWatchlistRefetchInterval(),
+    staleTime: STANDARD_POLLING_INTERVAL_MS,
     retry: false,
   });
   const watchlistQuoteItems = watchlistQuoteQuery.data?.items ?? [];
