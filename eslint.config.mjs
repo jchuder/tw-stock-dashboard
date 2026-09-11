@@ -93,6 +93,10 @@ export default tseslint.config(
               allow: { to: { element: { type: 'api-lib' } } },
             },
             {
+              from: { element: { type: 'api-lib', captured: { lib: 'securities' } } },
+              allow: { to: { element: { type: 'api-lib', captured: { lib: 'cache' } } } },
+            },
+            {
               from: { element: { type: 'api-lib' } },
               disallow: { to: { element: { type: 'api-feature' } } },
               message: 'api libs must not depend on features; invert the dependency',

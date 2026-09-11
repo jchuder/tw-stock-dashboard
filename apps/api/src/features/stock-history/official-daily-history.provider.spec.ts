@@ -2,15 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
 import type { Security } from '@tw-stock-dashboard/contracts';
 import type { CacheService } from '../../libs/cache/cache.service.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
+import { RedisCommandError } from '../../libs/cache/redis.error.js';
 import {
-  HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS,
-  HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS,
+  CLOSED_HISTORY_POLICY,
+  OPEN_HISTORY_POLICY,
+  monthlyHistoryKey,
+} from '../../libs/cache/window-cache.policies.js';
+import {
   OfficialDailyHistoryProvider,
-  monthlyHistoryCacheKey,
-  monthlyHistoryCacheTtl,
+  resolveHistoryPolicy,
 } from './official-daily-history.provider.js';
 
-type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del'>;
+type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del' | 'setNxPx' | 'releaseLockIfOwner'>;
 
 const TWSE_SECURITY: Security = {
   symbol: '2330',
@@ -27,7 +31,17 @@ const TPEX_SECURITY: Security = {
 };
 
 function makeCache(initial: Record<string, unknown> = {}): TestCache {
-  const values = new Map(Object.entries(initial));
+  // Seeds are stored as fresh coordination envelopes under the window the
+  // provider computes for the key's month; the window layer owns freshness.
+  const values = new Map(
+    Object.entries(initial).map(([key, value]): [string, unknown] => {
+      const month = /:(\d{6})$/.exec(key)?.[1];
+      const windowMs = month === undefined ? 30_000 : resolveHistoryPolicy(month).windowMs;
+      const windowId = Math.floor(Date.now() / windowMs);
+      return [key, { version: 1 as const, windowId, storedAt: new Date().toISOString(), value }];
+    }),
+  );
+  const locks = new Set<string>();
   return {
     getJson: vi.fn((key: string) => Effect.succeed(values.get(key) ?? null)),
     setJson: vi.fn((key: string, value: unknown) => {
@@ -35,11 +49,22 @@ function makeCache(initial: Record<string, unknown> = {}): TestCache {
       return Effect.succeed(undefined);
     }),
     del: vi.fn(() => Effect.succeed(undefined)),
+    setNxPx: vi.fn((key: string) => {
+      if (locks.has(key)) {
+        return Effect.succeed(false);
+      }
+      locks.add(key);
+      return Effect.succeed(true);
+    }),
+    releaseLockIfOwner: vi.fn((key: string) => {
+      locks.delete(key);
+      return Effect.succeed(1);
+    }),
   };
 }
 
 function createProvider(cache = makeCache()): OfficialDailyHistoryProvider {
-  return new OfficialDailyHistoryProvider(cache);
+  return new OfficialDailyHistoryProvider(new WindowCacheService(cache));
 }
 
 afterEach(() => {
@@ -208,7 +233,7 @@ describe('OfficialDailyHistoryProvider', () => {
   });
 
   it('serves a normalized monthly cache hit without calling upstream', async () => {
-    const key = monthlyHistoryCacheKey('twse', '2330', '202608');
+    const key = monthlyHistoryKey('twse', '2330', '202608');
     const cachedCandle = {
       date: '2026-08-06',
       open: 1040,
@@ -251,26 +276,29 @@ describe('OfficialDailyHistoryProvider', () => {
     await Effect.runPromise(createProvider(cache).getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06'));
 
     expect(cache.setJson).toHaveBeenCalledWith(
-      monthlyHistoryCacheKey('twse', '2330', '202608'),
-      [
-        {
-          date: '2026-08-06',
-          open: 1040,
-          high: 1060,
-          low: 1030,
-          close: 1050,
-          volume: 12000000,
-        },
-      ],
-      HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS,
+      monthlyHistoryKey('twse', '2330', '202608'),
+      expect.objectContaining({
+        version: 1,
+        value: [
+          {
+            date: '2026-08-06',
+            open: 1040,
+            high: 1060,
+            low: 1030,
+            close: 1050,
+            volume: 12000000,
+          },
+        ],
+      }),
+      CLOSED_HISTORY_POLICY.snapshotTtlMs / 1000,
     );
   });
 
-  it('uses a short TTL for the current Taipei month and a day TTL for closed months', () => {
+  it('resolves short windows for the current Taipei month and day windows for closed months', () => {
     const now = Date.parse('2026-08-06T04:00:00.000Z');
 
-    expect(monthlyHistoryCacheTtl('202608', now)).toBe(HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS);
-    expect(monthlyHistoryCacheTtl('202607', now)).toBe(HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS);
+    expect(resolveHistoryPolicy('202608', now)).toBe(OPEN_HISTORY_POLICY);
+    expect(resolveHistoryPolicy('202607', now)).toBe(CLOSED_HISTORY_POLICY);
   });
 
   it('rejects ESB until the dedicated official history provider is added', async () => {
@@ -283,6 +311,24 @@ describe('OfficialDailyHistoryProvider', () => {
     expect(either._tag).toBe('Left');
     if (either._tag === 'Left') {
       expect(either.left._tag).toBe('OfficialDailyHistoryError');
+    }
+  });
+
+  it('maps Redis failures to a typed StockHistoryCacheError instead of bypassing upstream', async () => {
+    const failing = {
+      getJson: () => Effect.fail(new RedisCommandError('GET', 'boom')),
+      setJson: () => Effect.succeed(undefined),
+      del: () => Effect.succeed(undefined),
+    } as unknown as TestCache;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ stat: 'OK', data: [] }), { status: 200 })));
+
+    const either = await Effect.runPromise(
+      Effect.either(createProvider(failing).getDailyHistory(TWSE_SECURITY, '2026-08-01', '2026-08-06')),
+    );
+
+    expect(either._tag).toBe('Left');
+    if (either._tag === 'Left') {
+      expect(either.left._tag).toBe('StockHistoryCacheError');
     }
   });
 });

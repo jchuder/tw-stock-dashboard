@@ -62,6 +62,18 @@ const FIXTURES = [
     expectViolation: true,
     label: 'api-lib -> api-feature (blocked)',
   },
+  {
+    file: 'apps/api/src/libs/securities/__bv__/s.ts',
+    content: `import { WindowCacheService } from '../../cache/window-cache.service.js';\nexport const s = WindowCacheService;\n`,
+    expectViolation: false,
+    label: 'api-lib (securities) -> api-lib (cache) (allowed)',
+  },
+  {
+    file: 'apps/api/src/libs/cache/__bv__/c.ts',
+    content: `import { UniverseResolver } from '../../securities/universe.resolver.js';\nexport const c = UniverseResolver;\n`,
+    expectViolation: true,
+    label: 'api-lib (cache) -> api-lib (securities) (blocked)',
+  },
 ];
 
 const createdDirs = new Set();

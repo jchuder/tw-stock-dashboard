@@ -2,39 +2,42 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Clock, Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
 import type {
+  Security,
   StockQuoteBatchItem,
   StockQuoteBatchResponse,
   StockQuoteProvider,
   StockQuoteResponse,
 } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
-import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import { FugleQuoteProvider, isFugleConfigured } from './fugle-quote.provider.js';
 import { OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
 import type { OfficialDailyQuoteError } from './official-daily-quote.error.js';
-import { StockQuoteCache } from './stock-quote.cache.js';
+import { StockQuoteCache, type StockQuoteMode } from './stock-quote.cache.js';
 import type { QuoteProviderResult } from './quote-provider.js';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
-import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
-import { StockNotFoundError } from '../../libs/securities/universe.error.js';
+import { StockNotFoundError, UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 import { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import type { CacheInfrastructureError } from '../../libs/cache/cache.service.js';
+import type { WindowCoordinationTimeoutError } from '../../libs/cache/window-cache.error.js';
 
-type StockQuoteFailure =
+export type StockQuoteFailure =
   | FugleQuoteError
   | TwseMisQuoteError
   | OfficialDailyQuoteError
   | TpexEsbQuoteError
   | StockNotFoundError
-  | UniverseUnavailableError;
+  | UniverseUnavailableError
+  | CacheInfrastructureError
+  | WindowCoordinationTimeoutError;
 
-// Application seam: TTL cache in front of Fugle, TWSE MIS, and official daily
-// fallback workflows, with source metadata assembled in one place.
-// Only normalized successes are cached — failures skip the write and the next
-// request retries upstream. Lookup runs before any provider, so a cached quote
-// is served even if the key was removed afterwards, until TTL.
+// Application seam: Redis window-cache in front of Fugle, TWSE MIS, and official
+// daily fallback workflows, with source metadata assembled in one place.
+// Freshness is windowId. Fugle mode is selected before lookup so enhanced and
+// public namespaces never reuse each other.
 // Request correlation comes free: PinoLogger binds the request-scoped child
 // logger (request_id) wherever a request context exists.
 // NOTE: @Inject is explicit because vitest (esbuild) does not emit
@@ -55,25 +58,39 @@ export class StockQuoteService {
       // Universe first: unknown symbols fail 404/503 here, and the resolved
       // market selects the provider — ESB never touches Fugle or MIS.
       const security = yield* this.universe.resolve(symbol);
-      const lookupTime = yield* Clock.currentTimeMillis;
-      const hit = this.cache.get(symbol, lookupTime);
-      if (hit) {
-        // Cache hits preserve the original provenance; only the flag flips.
-        // No TTL extension, no fetchedAt/asOf rewrite, no mutation — and no
-        // fallback event: replaying history is not a new fallback.
-        const cached = { ...hit, source: { ...hit.source, cacheHit: true } };
-        setSpanAttributes(servedSpanAttributes(cached.source.provider, cached.source.fallbackUsed, true));
-        addSpanEvent('market_data.quote_served', servedSpanAttributes(cached.source.provider, cached.source.fallbackUsed, true));
-        this.logger.info({
-          event: 'market_data_quote_served',
-          operation: 'quote',
-          symbol,
-          provider: cached.source.provider,
-          fallback_used: cached.source.fallbackUsed,
-          cache_hit: true,
-        });
-        return cached;
-      }
+      const mode: StockQuoteMode = isFugleConfigured() ? 'enhanced' : 'public';
+      const response = yield* this.cache.getOrLoad({
+        symbol,
+        mode,
+        load: () => this.orchestrateQuote(security),
+      });
+
+      setSpanAttributes(servedSpanAttributes(response.source.provider, response.source.fallbackUsed, response.source.cacheHit));
+      addSpanEvent(
+        'market_data.quote_served',
+        servedSpanAttributes(response.source.provider, response.source.fallbackUsed, response.source.cacheHit),
+      );
+      this.logger.info({
+        event: 'market_data_quote_served',
+        operation: 'quote',
+        symbol,
+        provider: response.source.provider,
+        fallback_used: response.source.fallbackUsed,
+        cache_hit: response.source.cacheHit,
+      });
+
+      return response;
+    });
+  }
+
+  private orchestrateQuote(
+    security: Security,
+  ): Effect.Effect<
+    StockQuoteResponse,
+    FugleQuoteError | TwseMisQuoteError | OfficialDailyQuoteError | TpexEsbQuoteError | StockNotFoundError
+  > {
+    return Effect.gen(this, function* () {
+      const symbol = security.symbol;
       if (security.market === 'ESB') {
         const esb = yield* this.tpexEsbQuoteProvider.getQuote(symbol);
         const completed = {
@@ -82,7 +99,7 @@ export class StockQuoteService {
           fallbackUsed: false,
           fallbackReason: null,
         } as const;
-        return yield* this.assemble(symbol, completed);
+        return yield* this.assemble(completed);
       }
       const completed = yield* this.fugleQuoteProvider.getQuote(symbol).pipe(
         Effect.map(
@@ -150,11 +167,13 @@ export class StockQuoteService {
           },
         ),
       );
-      return yield* this.assemble(symbol, completed);
+      return yield* this.assemble(completed);
     });
   }
 
-  getQuotes(symbols: readonly string[]): Effect.Effect<StockQuoteBatchResponse, never> {
+  getQuotes(
+    symbols: readonly string[],
+  ): Effect.Effect<StockQuoteBatchResponse, CacheInfrastructureError | UniverseUnavailableError> {
     return Effect.gen(this, function* () {
       // One bounded batch request avoids a browser-side N+1 API pattern while
       // preserving independent per-symbol failure states.
@@ -162,6 +181,25 @@ export class StockQuoteService {
         symbols.map((symbol) => Effect.either(this.getQuote(symbol))),
         { concurrency: 4 },
       );
+      // Global Redis outage: if Redis connection is dead or throwing command errors,
+      // fail the entire batch closed with 503.
+      const redisOutage = outcomes.find(
+        (outcome): outcome is Either.Left<CacheInfrastructureError, StockQuoteResponse> =>
+          Either.isLeft(outcome) &&
+          (outcome.left._tag === 'RedisConnectionError' || outcome.left._tag === 'RedisCommandError'),
+      );
+      if (redisOutage) {
+        return yield* Effect.fail(redisOutage.left);
+      }
+      // If the universe is completely unavailable for all symbols, fail the batch with 503.
+      if (
+        outcomes.length > 0 &&
+        outcomes.every((outcome) => Either.isLeft(outcome) && outcome.left._tag === 'UniverseUnavailableError')
+      ) {
+        return yield* Effect.fail(new UniverseUnavailableError());
+      }
+      // Per-symbol problems (single-symbol lock timeout, provider failure, not found, etc.)
+      // resolve as individual item statuses within an HTTP 200 batch response.
       const items: StockQuoteBatchItem[] = symbols.map((symbol, index) => {
         const outcome = outcomes[index]!;
         if (Either.isRight(outcome)) {
@@ -265,10 +303,10 @@ export class StockQuoteService {
     });
   }
 
-  // Shared response assembly: provenance stamping, TTL insertion, and the
-  // served log/span event. Providers stay focused on normalized quotes.
+  // Shared response assembly: provenance stamping with initial cacheHit=false.
+  // WindowCacheService owns cache coordination; served log/span events are
+  // emitted at the service boundary so hits and misses are coherent.
   private assemble(
-    symbol: string,
     completed: QuoteProviderResult & {
       readonly provider: StockQuoteProvider;
       readonly fallbackUsed: boolean;
@@ -276,8 +314,6 @@ export class StockQuoteService {
     },
   ): Effect.Effect<StockQuoteResponse, never> {
     return Effect.gen(this, function* () {
-      // fetchedAt marks when the winning provider completed — consistent with
-      // the TTL insertion instant, never the request start.
       const fetchedAt = yield* Clock.currentTimeMillis;
       const response: StockQuoteResponse = {
         ...completed.quote,
@@ -290,17 +326,6 @@ export class StockQuoteService {
           cacheHit: false,
         },
       };
-      this.cache.set(symbol, response, fetchedAt);
-      setSpanAttributes(servedSpanAttributes(response.source.provider, response.source.fallbackUsed, false));
-      addSpanEvent('market_data.quote_served', servedSpanAttributes(response.source.provider, response.source.fallbackUsed, false));
-      this.logger.info({
-        event: 'market_data_quote_served',
-        operation: 'quote',
-        symbol,
-        provider: response.source.provider,
-        fallback_used: response.source.fallbackUsed,
-        cache_hit: false,
-      });
       return response;
     });
   }
@@ -310,7 +335,14 @@ function batchError(error: StockQuoteFailure): NonNullable<StockQuoteBatchItem['
   if (error._tag === 'StockNotFoundError') {
     return 'not_found';
   }
-  if (error._tag === 'UniverseUnavailableError') {
+  if (
+    error._tag === 'UniverseUnavailableError' ||
+    error._tag === 'RedisCommandError' ||
+    error._tag === 'RedisConnectionError' ||
+    error._tag === 'WindowCoordinationTimeoutError' ||
+    error._tag === 'TpexEsbCacheError' ||
+    (error._tag === 'OfficialDailyQuoteError' && error.stage === 'cache')
+  ) {
     return 'unavailable';
   }
   return 'failed';

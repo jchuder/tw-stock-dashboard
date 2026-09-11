@@ -1,27 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Duration, Effect } from 'effect';
 import type { Security } from '@tw-stock-dashboard/contracts';
-import { CacheService } from '../../libs/cache/cache.service.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
+import {
+  CLOSED_HISTORY_POLICY,
+  OPEN_HISTORY_POLICY,
+  monthlyHistoryKey,
+} from '../../libs/cache/window-cache.policies.js';
+import type { WindowCachePolicy } from '../../libs/cache/window-cache.service.js';
 import type { BaseCandle } from './moving-average.js';
-import { OfficialDailyHistoryError } from './fugle-history.error.js';
+import { OfficialDailyHistoryError, StockHistoryCacheError } from './fugle-history.error.js';
 import { enumerateMonths, taipeiToday } from './history-window.js';
 
 export const TWSE_STOCK_DAY_URL = 'https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY';
 export const TPEX_TRADING_STOCK_URL = 'https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock';
-export const HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS = 5 * 60;
-export const HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS = 24 * 60 * 60;
 const UPSTREAM_TIMEOUT_MS = 3000;
-
-export function monthlyHistoryCacheKey(provider: 'twse' | 'tpex' | 'esb', symbol: string, month: string): string {
-  return `history:${provider}:${symbol}:${month}`;
-}
-
-export function monthlyHistoryCacheTtl(month: string, nowMs = Date.now()): number {
-  const currentMonth = taipeiToday(nowMs).slice(0, 7).replace('-', '');
-  return month === currentMonth
-    ? HISTORY_CACHE_CURRENT_MONTH_TTL_SECONDS
-    : HISTORY_CACHE_CLOSED_MONTH_TTL_SECONDS;
-}
 
 function parseRocDate(rocDateStr: string): string {
   const trimmed = rocDateStr.trim();
@@ -131,15 +124,23 @@ function parseCachedCandles(value: unknown): BaseCandle[] | undefined {
   return value as BaseCandle[];
 }
 
+// Month classification shared by providers and test seeders: the current
+// Taipei month refreshes on a short window; closed months are effectively
+// immutable and share a day-long window.
+export function resolveHistoryPolicy(month: string, nowMs = Date.now()): WindowCachePolicy {
+  const currentMonth = taipeiToday(nowMs).slice(0, 7).replace('-', '');
+  return month === currentMonth ? OPEN_HISTORY_POLICY : CLOSED_HISTORY_POLICY;
+}
+
 @Injectable()
 export class OfficialDailyHistoryProvider {
-  constructor(@Inject(CacheService) private readonly cache: CacheService) {}
+  constructor(@Inject(WindowCacheService) private readonly windows: WindowCacheService) {}
 
   getDailyHistory(
     security: Security,
     from: string,
     to: string,
-  ): Effect.Effect<OfficialDailyHistoryResult, OfficialDailyHistoryError> {
+  ): Effect.Effect<OfficialDailyHistoryResult, OfficialDailyHistoryError | StockHistoryCacheError> {
     const months = enumerateMonths(from, to);
     if (months.length === 0) {
       return Effect.fail(new OfficialDailyHistoryError({ cause: 'empty months' }));
@@ -166,8 +167,11 @@ export class OfficialDailyHistoryProvider {
     });
   }
 
-  private fetchTwseMonth(symbol: string, month: string): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
-    const key = monthlyHistoryCacheKey('twse', symbol, month);
+  private fetchTwseMonth(
+    symbol: string,
+    month: string,
+  ): Effect.Effect<BaseCandle[], OfficialDailyHistoryError | StockHistoryCacheError> {
+    const key = monthlyHistoryKey('twse', symbol, month);
     return this.withMonthlyCache(key, month, this.fetchTwseMonthUpstream(symbol, month));
   }
 
@@ -194,8 +198,11 @@ export class OfficialDailyHistoryProvider {
     );
   }
 
-  private fetchTpexMonth(symbol: string, month: string): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
-    const key = monthlyHistoryCacheKey('tpex', symbol, month);
+  private fetchTpexMonth(
+    symbol: string,
+    month: string,
+  ): Effect.Effect<BaseCandle[], OfficialDailyHistoryError | StockHistoryCacheError> {
+    const key = monthlyHistoryKey('tpex', symbol, month);
     return this.withMonthlyCache(key, month, this.fetchTpexMonthUpstream(symbol, month));
   }
 
@@ -229,15 +236,22 @@ export class OfficialDailyHistoryProvider {
     key: string,
     month: string,
     upstream: Effect.Effect<BaseCandle[], OfficialDailyHistoryError>,
-  ): Effect.Effect<BaseCandle[], OfficialDailyHistoryError> {
+  ): Effect.Effect<BaseCandle[], OfficialDailyHistoryError | StockHistoryCacheError> {
+    const policy = resolveHistoryPolicy(month);
     return Effect.gen(this, function* () {
-      const cached = parseCachedCandles(yield* this.cache.getJson(key));
-      if (cached !== undefined) {
-        return cached;
-      }
-      const candles = yield* upstream;
-      yield* this.cache.setJson(key, candles, monthlyHistoryCacheTtl(month));
-      return candles;
+      const coordinated = yield* this.windows
+        .getOrLoad({
+          key,
+          policy,
+          decode: (raw) => parseCachedCandles(raw) ?? null,
+          load: () => upstream,
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            cause instanceof OfficialDailyHistoryError ? cause : new StockHistoryCacheError(),
+          ),
+        );
+      return coordinated.value;
     });
   }
 }

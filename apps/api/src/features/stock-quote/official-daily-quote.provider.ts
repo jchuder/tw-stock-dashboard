@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Duration, Effect, Either, Schema } from 'effect';
 import { StockQuoteSchema } from '@tw-stock-dashboard/contracts';
-import { CacheService } from '../../libs/cache/cache.service.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
+import { OFFICIAL_QUOTE_POLICY, officialQuoteKey } from '../../libs/cache/window-cache.policies.js';
 import {
   OfficialDailyQuoteError,
   type OfficialDailyQuoteMarket,
@@ -17,13 +18,6 @@ import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 export const TWSE_DAILY_QUOTE_URL = 'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL';
 export const TPEX_DAILY_QUOTE_URL = 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes';
-export const OFFICIAL_DAILY_QUOTE_CACHE_TTL_SECONDS = 30;
-
-const CACHE_KEYS: Record<OfficialDailyQuoteMarket, string> = {
-  TWSE: 'official-quote:twse:v1',
-  TPEX: 'official-quote:tpex:v1',
-};
-
 type DailySnapshot = ReadonlyArray<OfficialTwseDailyRow> | ReadonlyArray<OfficialTpexDailyRow>;
 interface DailyQuoteFields {
   readonly symbol: string;
@@ -38,16 +32,12 @@ interface DailyQuoteFields {
   readonly tradeVolume: number | null;
 }
 
-// Public Data Mode uses one official daily snapshot per exchange. The
-// process-local singleflight prevents eight watchlist symbols from issuing
-// eight identical full-market requests; Redis cache handles later requests.
+// Public Data Mode uses one official daily snapshot per exchange. All symbols
+// share one coordinated 30-second window snapshot per market: the distributed
+// lock replaces the old process-local singleflight across tabs and instances.
 @Injectable()
 export class OfficialDailyQuoteProvider {
-  private readonly snapshotRefresh: Partial<
-    Record<OfficialDailyQuoteMarket, Promise<Either.Either<DailySnapshot, OfficialDailyQuoteError>>>
-  > = {};
-
-  constructor(@Inject(CacheService) private readonly cache: CacheService) {}
+  constructor(@Inject(WindowCacheService) private readonly windows: WindowCacheService) {}
 
   getQuote(
     symbol: string,
@@ -102,29 +92,22 @@ export class OfficialDailyQuoteProvider {
   ): Effect.Effect<ReadonlyArray<OfficialTpexDailyRow>, OfficialDailyQuoteError>;
   private getSnapshot(market: OfficialDailyQuoteMarket): Effect.Effect<DailySnapshot, OfficialDailyQuoteError> {
     return Effect.gen(this, function* () {
-      const cached = yield* this.cache.getJson(CACHE_KEYS[market]);
-      const parsed = parseSnapshot(cached, market);
-      if (parsed !== null) {
-        return parsed;
-      }
-      if (cached !== null) {
-        yield* this.cache.del(CACHE_KEYS[market]);
-      }
-      return yield* this.refreshSnapshot(market);
+      const coordinated = yield* this.windows
+        .getOrLoad({
+          key: officialQuoteKey(market),
+          policy: OFFICIAL_QUOTE_POLICY,
+          decode: (raw) => parseSnapshot(raw, market),
+          load: () => this.fetchSnapshot(market),
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            cause instanceof OfficialDailyQuoteError
+              ? cause
+              : new OfficialDailyQuoteError({ market, stage: 'cache' as const }),
+          ),
+        );
+      return coordinated.value;
     });
-  }
-
-
-  private refreshSnapshot(market: OfficialDailyQuoteMarket): Effect.Effect<DailySnapshot, OfficialDailyQuoteError> {
-    const active = this.snapshotRefresh[market];
-    const refresh =
-      active ??
-      (this.snapshotRefresh[market] = Effect.runPromise(Effect.either(this.fetchSnapshot(market))).finally(() => {
-        delete this.snapshotRefresh[market];
-      }));
-    return Effect.promise(() => refresh).pipe(
-      Effect.flatMap((result) => (Either.isRight(result) ? Effect.succeed(result.right) : Effect.fail(result.left))),
-    );
   }
 
   private fetchSnapshot(market: OfficialDailyQuoteMarket): Effect.Effect<DailySnapshot, OfficialDailyQuoteError> {
@@ -151,7 +134,6 @@ export class OfficialDailyQuoteProvider {
       if (snapshot === null) {
         return yield* new OfficialDailyQuoteError({ market, stage: 'decode' });
       }
-      yield* this.cache.setJson(CACHE_KEYS[market], snapshot, OFFICIAL_DAILY_QUOTE_CACHE_TTL_SECONDS);
       return snapshot;
     });
   }

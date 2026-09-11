@@ -1,11 +1,17 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CacheModule } from '../../libs/cache/cache.module.js';
 import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
 import { SecuritiesModule } from './securities.module.js';
+
+import { flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
+
+beforeEach(async () => {
+  await flushProjectRedisKeys();
+});
 
 function stubUniverse(): void {
   vi.stubGlobal(

@@ -97,7 +97,7 @@ describe('GET /api/v1/market/overview', () => {
   });
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-07T05:33:00.000Z'));
   });
 

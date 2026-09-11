@@ -1,7 +1,11 @@
 import { Effect, Either } from 'effect';
 import type { CacheService } from '../../libs/cache/cache.service.js';
+import { RedisCommandError } from '../../libs/cache/redis.error.js';
+import { TpexEsbCacheError } from './tpex-esb-quote.error.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ESB_SNAPSHOT_CACHE_KEY, ESB_SNAPSHOT_CACHE_TTL_SECONDS, TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import { ESB_SNAPSHOT_KEY } from '../../libs/cache/window-cache.policies.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
 
 const ROW_7883 = {
   Date: '1150907',
@@ -43,22 +47,52 @@ const EXPECTED_QUOTE = {
   limitDownPrice: null,
 };
 
-type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del'>;
+type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del' | 'setNxPx' | 'releaseLockIfOwner'>;
 
 function makeCache(initial: Record<string, unknown> = {}): TestCache {
-  const values = new Map(Object.entries(initial));
+  // Seeds are stored as fresh coordination envelopes, exactly like real
+  // writers store them; the window layer (not the fake) owns freshness.
+  const windowId = Math.floor(Date.now() / 30_000);
+  const storedAt = new Date().toISOString();
+  const locks = new Set<string>();
+  const values = new Map(
+    Object.entries(initial).map(([key, value]): [string, unknown] => [
+      key,
+      { version: 1 as const, windowId, storedAt, value },
+    ]),
+  );
   return {
-    getJson: vi.fn((key: string) => Effect.succeed(values.get(key) ?? null)),
-    setJson: vi.fn((key: string, value: unknown) => {
-      values.set(key, value);
-      return Effect.succeed(undefined);
-    }),
-    del: vi.fn(() => Effect.succeed(undefined)),
+    getJson: vi.fn((key: string) => Effect.sync(() => values.get(key) ?? null)),
+    setJson: vi.fn((key: string, value: unknown) =>
+      Effect.sync(() => {
+        values.set(key, value);
+      }),
+    ),
+    del: vi.fn((key: string) =>
+      Effect.sync(() => {
+        values.delete(key);
+      }),
+    ),
+    setNxPx: vi.fn((key: string) =>
+      Effect.sync(() => {
+        if (locks.has(key)) {
+          return false;
+        }
+        locks.add(key);
+        return true;
+      }),
+    ),
+    releaseLockIfOwner: vi.fn((key: string) =>
+      Effect.sync(() => {
+        locks.delete(key);
+        return 1;
+      }),
+    ),
   };
 }
 
 function cachedProvider(cache = makeCache()): TpexEsbQuoteProvider {
-  return new TpexEsbQuoteProvider(cache);
+  return new TpexEsbQuoteProvider(new WindowCacheService(cache));
 }
 
 function run(symbol = '7883', cache = makeCache()) {
@@ -116,14 +150,18 @@ describe('TpexEsbQuoteProvider typed failures', () => {
       expect(second.right.quote.symbol).toBe('1260');
     }
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(cache.getJson).toHaveBeenCalledTimes(2);
+    // Two reads on the first quote (miss + post-lock double-check), one hit on the second.
+    expect(cache.getJson).toHaveBeenCalledTimes(3);
     expect(cache.setJson).toHaveBeenCalledWith(
-      ESB_SNAPSHOT_CACHE_KEY,
-      expect.arrayContaining([
-        expect.objectContaining({ SecuritiesCompanyCode: '7883' }),
-        expect.objectContaining({ SecuritiesCompanyCode: '1260' }),
-      ]),
-      ESB_SNAPSHOT_CACHE_TTL_SECONDS,
+      ESB_SNAPSHOT_KEY,
+      expect.objectContaining({
+        version: 1,
+        value: expect.arrayContaining([
+          expect.objectContaining({ SecuritiesCompanyCode: '7883' }),
+          expect.objectContaining({ SecuritiesCompanyCode: '1260' }),
+        ]),
+      }),
+      90,
     );
   });
 
@@ -177,7 +215,7 @@ describe('TpexEsbQuoteProvider typed failures', () => {
   });
 
   it('refreshes and replaces an invalid cached snapshot', async () => {
-    const cache = makeCache({ [ESB_SNAPSHOT_CACHE_KEY]: { invalid: true } });
+    const cache = makeCache({ [ESB_SNAPSHOT_KEY]: { invalid: true } });
     okOnce([ROW_7883]);
 
     const result = await run('7883', cache);
@@ -186,11 +224,14 @@ describe('TpexEsbQuoteProvider typed failures', () => {
     if (Either.isRight(result)) {
       expect(result.right.quote.symbol).toBe('7883');
     }
-    expect(cache.del).toHaveBeenCalledWith(ESB_SNAPSHOT_CACHE_KEY);
+    expect(cache.del).toHaveBeenCalledWith(ESB_SNAPSHOT_KEY);
     expect(cache.setJson).toHaveBeenCalledWith(
-      ESB_SNAPSHOT_CACHE_KEY,
-      [expect.objectContaining({ SecuritiesCompanyCode: '7883' })],
-      ESB_SNAPSHOT_CACHE_TTL_SECONDS,
+      ESB_SNAPSHOT_KEY,
+      expect.objectContaining({
+        version: 1,
+        value: [expect.objectContaining({ SecuritiesCompanyCode: '7883' })],
+      }),
+      90,
     );
   });
   it('maps no-trade zero sentinels to null prices while preserving zero volume', async () => {
@@ -277,6 +318,22 @@ describe('TpexEsbQuoteProvider typed failures', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe('TpexEsbHttpError');
+    }
+  });
+
+  it('maps Redis failures to a cache error instead of bypassing upstream', async () => {
+    const failing = {
+      getJson: () => Effect.fail(new RedisCommandError('GET', 'boom')),
+      setJson: () => Effect.succeed(undefined),
+      del: () => Effect.succeed(undefined),
+    } as unknown as TestCache;
+    okOnce([]);
+
+    const result = await run('7883', failing);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(TpexEsbCacheError);
     }
   });
 });
