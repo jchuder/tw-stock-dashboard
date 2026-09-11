@@ -306,15 +306,16 @@ test('E: Remove active stock keeps quote and chart displayed', async ({ page }) 
   await expect(page.getByTestId('stock-quote-price')).toHaveText('568');
 });
 
-test('F: Long watchlist renders all items and both ends remain reachable', async ({ page }) => {
+test('F: Long watchlist scrolls internally and all items remain reachable', async ({ page }) => {
   // Deterministic single-quote fallback for the boot autofocus on the first item.
   await page.route('**/api/v1/stocks/*/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
   });
-  // Twenty deterministic rows exercise the filled-rail layout. NOTE: the
-  // desktop rail stretches with content (flex, max-height none), so internal
-  // scrollHeight overflow is not the product contract here — reachability is.
+  // The autofocused focus card mounts history UI; keep it deterministic too.
+  await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
+  // Twenty rows overflow the focus-decided rail; the list must scroll
+  // internally instead of stretching the page.
   const items = [
     '2330', '2454', '2308', '2317', '2382', '3008', '2881', '2002',
     '1101', '1216', '1301', '1303', '1326', '1402',
@@ -330,12 +331,18 @@ test('F: Long watchlist renders all items and both ends remain reachable', async
   await expect(container).toBeVisible();
   await expect(container).toHaveCSS('overflow-y', 'auto');
 
+  // The filled rail scrolls internally instead of stretching the page.
+  const isScrollable = await container.evaluate(
+    (el) => el.scrollHeight > el.clientHeight,
+  );
+  expect(isScrollable).toBe(true);
+
   // Every row renders.
   for (const symbol of items) {
     await expect(page.getByTestId(`watchlist-item-${symbol}`)).toHaveCount(1);
   }
 
-  // Both ends stay reachable through the rail.
+  // Both ends stay reachable through the scrollable rail.
   const lastItem = page.getByTestId(`watchlist-item-${items[items.length - 1]}`);
   await lastItem.scrollIntoViewIfNeeded();
   await expect(lastItem).toBeVisible();
