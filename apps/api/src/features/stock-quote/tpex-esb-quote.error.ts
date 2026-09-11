@@ -14,8 +14,13 @@ export class TpexEsbDecodeError extends Data.TaggedError('TpexEsbDecodeError')<{
   readonly stage: 'json' | 'schema' | 'value';
 }> {}
 
+// Redis coordination failure (ADR 008): distinct from upstream json/schema/value
+// failures so error classification never mistakes infrastructure for provider data.
+export class TpexEsbCacheError extends Data.TaggedError('TpexEsbCacheError') {}
+
 export type TpexEsbQuoteError =
   | TpexEsbNetworkError
   | TpexEsbTimeoutError
   | TpexEsbHttpError
-  | TpexEsbDecodeError;
+  | TpexEsbDecodeError
+  | TpexEsbCacheError;

@@ -1,90 +1,77 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Effect } from 'effect';
-import { getRedisClient, reportRedisFailure } from './redis.client.js';
+import type { RedisCommandError, RedisConnectionError } from './redis.error.js';
+import { RedisService } from './redis.service.js';
 
-// node-redis connects lazily; ensureConnected issues one shared connect attempt
-// so concurrent first requests do not stampede it.
-let connectAttempt: Promise<unknown> | null = null;
+export type CacheInfrastructureError = RedisCommandError | RedisConnectionError;
 
-async function ensureConnected(): Promise<boolean> {
-  const client = getRedisClient();
-  if (!client) {
-    return false;
-  }
-  if (client.isOpen) {
-    return true;
-  }
-  try {
-    connectAttempt ??= client.connect().catch((err: unknown) => {
-      connectAttempt = null;
-      throw err;
-    });
-    await connectAttempt;
-    return true;
-  } catch (err) {
-    reportRedisFailure(`Redis connect failed, bypassing cache: ${err instanceof Error ? err.message : String(err)}`);
-    return false;
-  }
-}
+// Structural port for JSON cache consumers: providers depend only on the
+// three methods they use (same philosophy as the UniverseCache port), which
+// also keeps Pick-based test fakes assignable now that the class carries
+// private infrastructure state.
+export type CachePort = Pick<CacheService, 'getJson' | 'setJson' | 'del' | 'setNxPx' | 'releaseLockIfOwner'>;
 
-// Fail-open JSON cache adapter. Every failure path resolves to the bypass
-// value (null / void) instead of failing the Effect: cache infrastructure
-// must degrade performance, never correctness. Corrupt entries are deleted
-// so one bad write cannot poison reads for a full TTL.
+const log = new Logger('CacheService');
+
+// Mandatory-Redis JSON cache adapter (ADR 008). Reads resolve to data or
+// null (miss); infrastructure failures are typed, never swallowed, so callers
+// map them to domain errors instead of silently bypassing to upstream.
+// Corrupt payloads are evicted best-effort and resolve to a miss — the
+// rebuild overwrites the poisoned entry.
 @Injectable()
 export class CacheService {
-  getJson(key: string): Effect.Effect<unknown | null, never> {
-    return Effect.promise(async () => {
+  constructor(private readonly redis: RedisService) {}
+
+  getJson(key: string): Effect.Effect<unknown | null, CacheInfrastructureError> {
+    return Effect.gen(this, function* () {
+      const raw = yield* Effect.tryPromise({
+        try: () => this.redis.get(key),
+        catch: (cause) => cause as CacheInfrastructureError,
+      });
+      if (raw === null) {
+        return null;
+      }
       try {
-        if (!(await ensureConnected())) {
-          return null;
-        }
-        const raw = await getRedisClient()?.get(key);
-        if (raw === undefined || raw === null) {
-          return null;
-        }
-        try {
-          return JSON.parse(raw) as unknown;
-        } catch {
-          reportRedisFailure(`Redis cache decode failed for key ${key}, deleting entry`);
-          await getRedisClient()?.del(key);
-          return null;
-        }
-      } catch (err) {
-        reportRedisFailure(
-          `Redis GET failed for key ${key}, bypassing cache: ${err instanceof Error ? err.message : String(err)}`,
+        return JSON.parse(raw) as unknown;
+      } catch {
+        log.warn(`Redis cache decode failed for key ${key}; evicting entry as a miss`);
+        yield* Effect.ignore(
+          Effect.tryPromise({
+            try: () => this.redis.del(key),
+            catch: () => undefined,
+          }),
         );
         return null;
       }
     });
   }
 
-  setJson(key: string, value: unknown, ttlSeconds: number): Effect.Effect<void, never> {
-    return Effect.promise(async () => {
-      try {
-        if (!(await ensureConnected())) {
-          return;
-        }
-        await getRedisClient()?.set(key, JSON.stringify(value), { EX: ttlSeconds });
-      } catch (err) {
-        reportRedisFailure(
-          `Redis SET failed for key ${key}, bypassing cache: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+  setJson(key: string, value: unknown, ttlSeconds: number): Effect.Effect<void, CacheInfrastructureError> {
+    return Effect.tryPromise({
+      try: () => this.redis.set(key, JSON.stringify(value), ttlSeconds * 1000),
+      catch: (cause) => cause as CacheInfrastructureError,
     });
   }
-  del(key: string): Effect.Effect<void, never> {
-    return Effect.promise(async () => {
-      try {
-        if (!(await ensureConnected())) {
-          return;
-        }
-        await getRedisClient()?.del(key);
-      } catch (err) {
-        reportRedisFailure(
-          `Redis DEL failed for key ${key}, bypassing cache: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+
+  setNxPx(key: string, token: string, ttlMs: number): Effect.Effect<boolean, CacheInfrastructureError> {
+    return Effect.tryPromise({
+      try: () => this.redis.setNxPx(key, token, ttlMs),
+      catch: (cause) => cause as CacheInfrastructureError,
+    });
+  }
+
+  releaseLockIfOwner(key: string, token: string): Effect.Effect<number, CacheInfrastructureError> {
+    return Effect.tryPromise({
+      try: () => this.redis.releaseLockIfOwner(key, token),
+      catch: (cause) => cause as CacheInfrastructureError,
+    });
+  }
+
+  del(key: string): Effect.Effect<void, CacheInfrastructureError> {
+    return Effect.tryPromise({
+      try: () =>
+        this.redis.del(key).then(() => undefined),
+      catch: (cause) => cause as CacheInfrastructureError,
     });
   }
 }
