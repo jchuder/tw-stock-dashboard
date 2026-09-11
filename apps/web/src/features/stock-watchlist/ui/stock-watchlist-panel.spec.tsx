@@ -19,7 +19,7 @@ describe('StockWatchlistPanel controls', () => {
       />,
     );
 
-    expect(markup.match(/<button/g)).toHaveLength(5);
+    expect(markup.match(/<button/g)).toHaveLength(3);
     expect(markup).toContain('class="watchlist-drag-handle"');
     expect(markup).toContain('aria-label="2330 台積電"');
     expect(markup).toContain('aria-label="移除 2330"');

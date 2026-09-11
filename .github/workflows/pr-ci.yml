@@ -1,0 +1,105 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  commitlint:
+    name: pr-commitlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR merge result
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          install: true
+
+      - name: Validate PR commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+
+  quality:
+    name: pr-quality
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - name: Checkout PR merge result
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          install: true
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+  e2e:
+    name: pr-e2e
+    if: github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - name: Checkout PR merge result
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          install: true
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2E
+        run: pnpm test:e2e

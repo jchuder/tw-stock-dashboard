@@ -159,7 +159,7 @@ describe('MarketOverviewService', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null if candidate date is from previous trading day', () => {
+    it('classifies a previous-day completed session as closed (e.g. Friday close observed Monday 09:15)', () => {
       const now = new Date('2026-09-07T09:15:00+08:00');
       const candidate: RawMisIndexCandidate = {
         symbol: 't00',
@@ -169,6 +169,70 @@ describe('MarketOverviewService', () => {
         tradeDate: '2026-09-04',
         time: '13:33:00',
         asOf: '2026-09-04T13:33:00+08:00',
+      };
+
+      const result = classifyIndexState(candidate, now);
+      expect(result).toEqual({
+        value: 46551.13,
+        change: 693.47,
+        changePercent: 1.51,
+        state: 'closed',
+        tradeDate: '2026-09-04',
+        asOf: null,
+        source: 'twse-mis',
+      });
+    });
+
+    it('classifies a previous-day completed session as closed across midnight (e.g. 09-08 close observed 09-09 01:05)', () => {
+      const now = new Date('2026-09-09T01:05:00+08:00');
+      const candidate: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 47105.78,
+        change: -220.49,
+        changePercent: -0.47,
+        tradeDate: '2026-09-08',
+        time: '13:33:00',
+        asOf: '2026-09-08T13:33:00+08:00',
+      };
+
+      const result = classifyIndexState(candidate, now);
+      expect(result).toEqual({
+        value: 47105.78,
+        change: -220.49,
+        changePercent: -0.47,
+        state: 'closed',
+        tradeDate: '2026-09-08',
+        asOf: null,
+        source: 'twse-mis',
+      });
+    });
+
+    it('returns null for a previous-day candidate without a completed close (e.g. 10:00 snapshot)', () => {
+      const now = new Date('2026-09-07T09:15:00+08:00');
+      const candidate: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 46500.0,
+        change: -51.13,
+        changePercent: -0.11,
+        tradeDate: '2026-09-04',
+        time: '10:00:00',
+        asOf: '2026-09-04T10:00:00+08:00',
+      };
+
+      const result = classifyIndexState(candidate, now);
+      expect(result).toBeNull();
+    });
+
+    it('returns null for a future-dated candidate', () => {
+      const now = new Date('2026-09-07T14:14:00+08:00');
+      const candidate: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 47105.78,
+        change: -220.49,
+        changePercent: -0.47,
+        tradeDate: '2026-09-08',
+        time: '13:33:00',
+        asOf: '2026-09-08T13:33:00+08:00',
       };
 
       const result = classifyIndexState(candidate, now);
@@ -193,7 +257,7 @@ describe('MarketOverviewService', () => {
   });
 
   describe('getOverview', () => {
-    it('uses MIS indices when available (e.g. 14:14 batch-gap regression case)', async () => {
+    it('prefers newer MIS closed over older OpenAPI (freshness comparison, e.g. 14:14 batch-gap case)', async () => {
       const now = new Date('2026-09-07T14:14:00+08:00');
       vi.spyOn(misProvider, 'getIndices').mockReturnValue(
         Effect.succeed({
@@ -201,8 +265,8 @@ describe('MarketOverviewService', () => {
           otc: mockMisOtcCandidate,
         }),
       );
-      vi.spyOn(twseProvider, 'getTaiex');
-      vi.spyOn(tpexProvider, 'getOtc');
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
       vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
         Effect.succeed(mockInstitutional),
       );
@@ -232,10 +296,146 @@ describe('MarketOverviewService', () => {
       }
 
       expect(misProvider.getIndices).toHaveBeenCalledOnce();
-      // Neither TWSE nor TPEx OpenAPI should be called when MIS is healthy
-      expect(twseProvider.getTaiex).not.toHaveBeenCalled();
-      expect(tpexProvider.getOtc).not.toHaveBeenCalled();
+      // Closed MIS candidates must be freshness-checked against OpenAPI.
+      expect(twseProvider.getTaiex).toHaveBeenCalledOnce();
+      expect(tpexProvider.getOtc).toHaveBeenCalledOnce();
       expect(twseProvider.getInstitutionalFlow).toHaveBeenCalledOnce();
+    });
+
+    it('serves previous-day MIS closed across midnight instead of older OpenAPI (e.g. 09-09 01:05 regression)', async () => {
+      const now = new Date('2026-09-09T01:05:00+08:00');
+      const misClose: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 47105.78,
+        change: -220.49,
+        changePercent: -0.47,
+        tradeDate: '2026-09-08',
+        time: '13:33:00',
+        asOf: '2026-09-08T13:33:00+08:00',
+      };
+      const staleOpenApi: MarketIndexSnapshot = {
+        value: 47326.27,
+        change: 775.14,
+        changePercent: 1.67,
+        state: 'closed',
+        tradeDate: '2026-09-07',
+        asOf: null,
+        source: 'twse',
+      };
+      vi.spyOn(misProvider, 'getIndices').mockReturnValue(
+        Effect.succeed({ taiex: misClose, otc: null }),
+      );
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(staleOpenApi));
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
+      vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
+        Effect.succeed(mockInstitutional),
+      );
+
+      const result = await Effect.runPromise(Effect.either(service.getOverview(now)));
+      expect(Either.isRight(result)).toBe(true);
+      if (Either.isRight(result)) {
+        expect(result.right.taiex.value).toBe(47105.78);
+        expect(result.right.taiex.tradeDate).toBe('2026-09-08');
+        expect(result.right.taiex.state).toBe('closed');
+        expect(result.right.taiex.source).toBe('twse-mis');
+      }
+    });
+
+    it('prefers newer OpenAPI closed when MIS closed is older', async () => {
+      const now = new Date('2026-09-09T01:05:00+08:00');
+      const staleMis: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 47326.27,
+        change: 775.14,
+        changePercent: 1.67,
+        tradeDate: '2026-09-07',
+        time: '13:33:00',
+        asOf: '2026-09-07T13:33:00+08:00',
+      };
+      const freshOpenApi: MarketIndexSnapshot = {
+        value: 47105.78,
+        change: -220.49,
+        changePercent: -0.47,
+        state: 'closed',
+        tradeDate: '2026-09-08',
+        asOf: null,
+        source: 'twse',
+      };
+      vi.spyOn(misProvider, 'getIndices').mockReturnValue(
+        Effect.succeed({ taiex: staleMis, otc: null }),
+      );
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(freshOpenApi));
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
+      vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
+        Effect.succeed(mockInstitutional),
+      );
+
+      const result = await Effect.runPromise(Effect.either(service.getOverview(now)));
+      expect(Either.isRight(result)).toBe(true);
+      if (Either.isRight(result)) {
+        expect(result.right.taiex).toEqual(freshOpenApi);
+        expect(result.right.taiex.source).toBe('twse');
+      }
+    });
+
+    it('keeps MIS closed when the OpenAPI freshness probe fails', async () => {
+      const now = new Date('2026-09-09T01:05:00+08:00');
+      const misClose: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 47105.78,
+        change: -220.49,
+        changePercent: -0.47,
+        tradeDate: '2026-09-08',
+        time: '13:33:00',
+        asOf: '2026-09-08T13:33:00+08:00',
+      };
+      vi.spyOn(misProvider, 'getIndices').mockReturnValue(
+        Effect.succeed({ taiex: misClose, otc: null }),
+      );
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.fail(new TwseMarketError()));
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
+      vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
+        Effect.succeed(mockInstitutional),
+      );
+
+      const result = await Effect.runPromise(Effect.either(service.getOverview(now)));
+      expect(Either.isRight(result)).toBe(true);
+      if (Either.isRight(result)) {
+        expect(result.right.taiex.tradeDate).toBe('2026-09-08');
+        expect(result.right.taiex.source).toBe('twse-mis');
+      }
+    });
+
+    it('uses intraday MIS directly without an OpenAPI probe (e.g. 09-09 10:00)', async () => {
+      const now = new Date('2026-09-09T10:00:00+08:00');
+      const intraday: RawMisIndexCandidate = {
+        symbol: 't00',
+        value: 47200.0,
+        change: 94.22,
+        changePercent: 0.2,
+        tradeDate: '2026-09-09',
+        time: '10:00:00',
+        asOf: '2026-09-09T10:00:00+08:00',
+      };
+      vi.spyOn(misProvider, 'getIndices').mockReturnValue(
+        Effect.succeed({ taiex: intraday, otc: null }),
+      );
+      vi.spyOn(twseProvider, 'getTaiex');
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
+      vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
+        Effect.succeed(mockInstitutional),
+      );
+
+      const result = await Effect.runPromise(Effect.either(service.getOverview(now)));
+      expect(Either.isRight(result)).toBe(true);
+      if (Either.isRight(result)) {
+        expect(result.right.taiex.state).toBe('intraday');
+        expect(result.right.taiex.tradeDate).toBe('2026-09-09');
+        expect(result.right.taiex.source).toBe('twse-mis');
+      }
+
+      expect(twseProvider.getTaiex).not.toHaveBeenCalled();
+      expect(tpexProvider.getOtc).toHaveBeenCalledOnce();
     });
 
     it('falls back to OpenAPI providers when MIS completely fails', async () => {
@@ -268,7 +468,7 @@ describe('MarketOverviewService', () => {
           otc: null,
         }),
       );
-      vi.spyOn(twseProvider, 'getTaiex');
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
       vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
       vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
         Effect.succeed(mockInstitutional),
@@ -283,7 +483,7 @@ describe('MarketOverviewService', () => {
         expect(result.right.otc.source).toBe('tpex');
       }
 
-      expect(twseProvider.getTaiex).not.toHaveBeenCalled();
+      expect(twseProvider.getTaiex).toHaveBeenCalledOnce();
       expect(tpexProvider.getOtc).toHaveBeenCalledOnce();
     });
 
@@ -295,7 +495,7 @@ describe('MarketOverviewService', () => {
         }),
       );
       vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
-      vi.spyOn(tpexProvider, 'getOtc');
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
       vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
         Effect.succeed(mockInstitutional),
       );
@@ -310,7 +510,7 @@ describe('MarketOverviewService', () => {
       }
 
       expect(twseProvider.getTaiex).toHaveBeenCalledOnce();
-      expect(tpexProvider.getOtc).not.toHaveBeenCalled();
+      expect(tpexProvider.getOtc).toHaveBeenCalledOnce();
     });
 
     it('falls back to TWSE OpenAPI when MIS candidate is stale-today (10:00 snapshot at 14:14)', async () => {
@@ -332,7 +532,7 @@ describe('MarketOverviewService', () => {
         }),
       );
       vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
-      vi.spyOn(tpexProvider, 'getOtc');
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
       vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
         Effect.succeed(mockInstitutional),
       );
@@ -350,7 +550,7 @@ describe('MarketOverviewService', () => {
       }
 
       expect(twseProvider.getTaiex).toHaveBeenCalledOnce();
-      expect(tpexProvider.getOtc).not.toHaveBeenCalled();
+      expect(tpexProvider.getOtc).toHaveBeenCalledOnce();
     });
 
     it('allows valid mixed dates (e.g. TAIEX/OTC at 2026-09-07 and Institutional at 2026-09-04)', async () => {
@@ -361,6 +561,8 @@ describe('MarketOverviewService', () => {
           otc: mockMisOtcCandidate,
         }),
       );
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
       vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
         Effect.succeed(mockInstitutional),
       );
@@ -381,6 +583,8 @@ describe('MarketOverviewService', () => {
           otc: mockMisOtcCandidate,
         }),
       );
+      vi.spyOn(twseProvider, 'getTaiex').mockReturnValue(Effect.succeed(mockOpenApiTaiex));
+      vi.spyOn(tpexProvider, 'getOtc').mockReturnValue(Effect.succeed(mockOpenApiOtc));
       vi.spyOn(twseProvider, 'getInstitutionalFlow').mockReturnValue(
         Effect.fail(new InstitutionalFlowError()),
       );

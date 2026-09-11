@@ -46,6 +46,9 @@ export class StockHistoryController {
       if (err._tag === 'UniverseUnavailableError') {
         throw new ServiceUnavailableException('Security universe temporarily unavailable');
       }
+      if (err._tag === 'StockHistoryCacheError') {
+        throw new ServiceUnavailableException('Market data cache temporarily unavailable');
+      }
       throw new InternalServerErrorException('Failed to fetch stock history');
     }
     return result.right;

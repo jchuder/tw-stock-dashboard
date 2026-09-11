@@ -41,7 +41,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
 
     const result = await run();
 
-    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null, sessionTime: null }));
   });
 
   it('maps valid tlong millis string to asOf ISO', async () => {
@@ -50,7 +50,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
     const result = await run();
 
     expect(result).toEqual(
-      Either.right({ quote: EXPECTED_QUOTE, asOf: '2023-05-29T05:30:00.000Z' }),
+      Either.right({ quote: EXPECTED_QUOTE, asOf: '2023-05-29T05:30:00.000Z', sessionTime: null }),
     );
   });
 
@@ -59,7 +59,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
 
     const result = await run();
 
-    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null, sessionTime: null }));
   });
 
   it('degrades out-of-range tlong to null without throwing RangeError', async () => {
@@ -67,7 +67,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
 
     const result = await run();
 
-    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null, sessionTime: null }));
   });
 
   it('normalizes an otc entry to a TPEX quote without float noise', async () => {
@@ -96,6 +96,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
           limitDownPrice: null,
         },
         asOf: null,
+        sessionTime: null,
       }),
     );
   });
@@ -131,6 +132,7 @@ describe('TwseMisQuoteProvider typed failures', () => {
           limitDownPrice: 510,
         },
         asOf: null,
+        sessionTime: null,
       }),
     );
   });
@@ -142,7 +144,30 @@ describe('TwseMisQuoteProvider typed failures', () => {
 
     const result = await run();
 
-    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null }));
+    expect(result).toEqual(Either.right({ quote: EXPECTED_QUOTE, asOf: null, sessionTime: null }));
+  });
+
+  it('normalizes a valid MIS session time', async () => {
+    okOnce({ msgArray: [{ ...TSE_ENTRY, d: '20260908', t: '13:30:00' }] });
+
+    const result = await run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.sessionTime).toBe('13:30:00');
+      expect(result.right.quote.tradeDate).toBe('2026-09-08');
+    }
+  });
+
+  it('degrades missing or malformed session time to null without failing the quote', async () => {
+    okOnce({ msgArray: [{ ...TSE_ENTRY, d: '20260908', t: 'closed' }] });
+
+    const malformed = await run();
+
+    expect(Either.isRight(malformed)).toBe(true);
+    if (Either.isRight(malformed)) {
+      expect(malformed.right.sessionTime).toBeNull();
+    }
   });
 
   it('parses comma-grouped cumulative volume', async () => {

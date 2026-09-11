@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Duration, Either, Effect, Schema } from 'effect';
+import { Duration, Effect, Schema } from 'effect';
 import { StockQuoteSchema } from '@tw-stock-dashboard/contracts';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 import {
+  TpexEsbCacheError,
   TpexEsbDecodeError,
   TpexEsbHttpError,
   TpexEsbNetworkError,
@@ -10,12 +11,12 @@ import {
 } from './tpex-esb-quote.error.js';
 import type { QuoteProvider, QuoteProviderResult } from './quote-provider.js';
 import { TpexEsbSnapshotSchema, type TpexEsbEntry } from './tpex-esb-quote.schema.js';
-import { CacheService } from '../../libs/cache/cache.service.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
+import { ESB_SNAPSHOT_KEY, ESB_SNAPSHOT_POLICY } from '../../libs/cache/window-cache.policies.js';
 import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 
 export const TPEX_ESB_SNAPSHOT_URL = 'https://www.tpex.org.tw/openapi/v1/tpex_esb_latest_statistics';
-export const ESB_SNAPSHOT_CACHE_KEY = 'esb-latest:v1';
-export const ESB_SNAPSHOT_CACHE_TTL_SECONDS = 30;
+
 
 // TPEx ESB latest-statistics snapshot: one ~140KB full-market payload,
 // filtered locally for the symbol. ESB is a negotiated quote-driven market
@@ -23,11 +24,19 @@ export const ESB_SNAPSHOT_CACHE_TTL_SECONDS = 30;
 // average (null when the official value is absent, e.g. listing day), and
 // change figures are null alongside it — never 0-based. Volume is natively
 // shares (股), matching the ESB daily 成交股數.
+function isTpexEsbQuoteError(cause: unknown): cause is TpexEsbQuoteError {
+  return (
+    cause instanceof TpexEsbNetworkError ||
+    cause instanceof TpexEsbTimeoutError ||
+    cause instanceof TpexEsbHttpError ||
+    cause instanceof TpexEsbDecodeError ||
+    cause instanceof TpexEsbCacheError
+  );
+}
+
 @Injectable()
 export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
-  // ponytail: process-local singleflight; add a distributed lock only if API replicas need cross-process stampede control.
-  private snapshotRefresh: Promise<Either.Either<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError>> | null = null;
-  constructor(@Inject(CacheService) private readonly cache: CacheService) {}
+  constructor(@Inject(WindowCacheService) private readonly windows: WindowCacheService) {}
 
   getQuote(symbol: string): Effect.Effect<QuoteProviderResult, TpexEsbQuoteError> {
     return Effect.gen(this, function* () {
@@ -77,31 +86,24 @@ export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
 
   private getSnapshot(): Effect.Effect<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError> {
     return Effect.gen(this, function* () {
-      const cached = yield* this.cache.getJson(ESB_SNAPSHOT_CACHE_KEY);
-      if (cached !== null) {
-        const decoded = yield* Effect.either(Schema.decodeUnknown(TpexEsbSnapshotSchema)(cached));
-        if (Either.isRight(decoded)) {
-          return decoded.right;
-        }
-        yield* this.cache.del(ESB_SNAPSHOT_CACHE_KEY);
-      }
-
-      return yield* this.refreshSnapshot();
+      const coordinated = yield* this.windows
+        .getOrLoad({
+          key: ESB_SNAPSHOT_KEY,
+          policy: ESB_SNAPSHOT_POLICY,
+          decode: (raw) => {
+            const decoded = Schema.decodeUnknownEither(TpexEsbSnapshotSchema)(raw);
+            return decoded._tag === 'Right' ? decoded.right : null;
+          },
+          load: () => this.fetchSnapshot(),
+        })
+        .pipe(
+          Effect.mapError((cause) => (isTpexEsbQuoteError(cause) ? cause : new TpexEsbCacheError())),
+        );
+      return coordinated.value;
     });
   }
 
-  private refreshSnapshot(): Effect.Effect<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError> {
-    const refresh =
-      this.snapshotRefresh ??
-      (this.snapshotRefresh = Effect.runPromise(Effect.either(this.fetchSnapshotAndCache())).finally(() => {
-        this.snapshotRefresh = null;
-      }));
-    return Effect.promise(() => refresh).pipe(
-      Effect.flatMap((result) => (Either.isRight(result) ? Effect.succeed(result.right) : Effect.fail(result.left))),
-    );
-  }
-
-  private fetchSnapshotAndCache(): Effect.Effect<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError> {
+  private fetchSnapshot(): Effect.Effect<ReadonlyArray<TpexEsbEntry>, TpexEsbQuoteError> {
     return Effect.gen(this, function* () {
       const response = yield* Effect.tryPromise({
         try: (signal) => fetch(TPEX_ESB_SNAPSHOT_URL, { signal, headers: { Accept: 'application/json' } }),
@@ -123,7 +125,6 @@ export class TpexEsbQuoteProvider implements QuoteProvider<TpexEsbQuoteError> {
       const snapshot = yield* Schema.decodeUnknown(TpexEsbSnapshotSchema)(raw).pipe(
         Effect.mapError(() => new TpexEsbDecodeError({ stage: 'schema' })),
       );
-      yield* this.cache.setJson(ESB_SNAPSHOT_CACHE_KEY, snapshot, ESB_SNAPSHOT_CACHE_TTL_SECONDS);
       return snapshot;
     });
   }

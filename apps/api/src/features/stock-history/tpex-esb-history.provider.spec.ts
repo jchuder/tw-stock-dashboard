@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
 import type { Security } from '@tw-stock-dashboard/contracts';
 import type { CacheService } from '../../libs/cache/cache.service.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
+import { RedisCommandError } from '../../libs/cache/redis.error.js';
+import { CLOSED_HISTORY_POLICY, monthlyHistoryKey } from '../../libs/cache/window-cache.policies.js';
 import { TPEX_ESB_HISTORICAL_URL, TpexEsbHistoryProvider } from './tpex-esb-history.provider.js';
 
-type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del'>;
+type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del' | 'setNxPx' | 'releaseLockIfOwner'>;
 
 const ESB_SECURITY: Security = {
   symbol: '7883',
@@ -29,7 +32,17 @@ const EXPECTED_FIELDS = [
 ] as const;
 
 function makeCache(initial: Record<string, unknown> = {}): TestCache {
-  const values = new Map(Object.entries(initial));
+  // Seeds are stored as fresh coordination envelopes, exactly like real
+  // writers store them; the window layer (not the fake) owns freshness.
+  const windowId = Math.floor(Date.now() / 30_000);
+  const storedAt = new Date().toISOString();
+  const locks = new Set<string>();
+  const values = new Map(
+    Object.entries(initial).map(([key, value]): [string, unknown] => [
+      key,
+      { version: 1 as const, windowId, storedAt, value },
+    ]),
+  );
   return {
     getJson: vi.fn((key: string) => Effect.succeed(values.get(key) ?? null)),
     setJson: vi.fn((key: string, value: unknown) => {
@@ -37,11 +50,22 @@ function makeCache(initial: Record<string, unknown> = {}): TestCache {
       return Effect.succeed(undefined);
     }),
     del: vi.fn(() => Effect.succeed(undefined)),
+    setNxPx: vi.fn((key: string) => {
+      if (locks.has(key)) {
+        return Effect.succeed(false);
+      }
+      locks.add(key);
+      return Effect.succeed(true);
+    }),
+    releaseLockIfOwner: vi.fn((key: string) => {
+      locks.delete(key);
+      return Effect.succeed(1);
+    }),
   };
 }
 
 function createProvider(cache = makeCache()): TpexEsbHistoryProvider {
-  return new TpexEsbHistoryProvider(cache);
+  return new TpexEsbHistoryProvider(new WindowCacheService(cache));
 }
 
 function response(
@@ -94,7 +118,11 @@ describe('TpexEsbHistoryProvider', () => {
       },
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(cache.setJson).toHaveBeenCalledWith('history:esb:7883:202608', expect.any(Array), expect.any(Number));
+    expect(cache.setJson).toHaveBeenCalledWith(
+      monthlyHistoryKey('esb', '7883', '202608'),
+      expect.objectContaining({ version: 1 }),
+      CLOSED_HISTORY_POLICY.snapshotTtlMs / 1000,
+    );
   });
 
   it('keeps second-group volume but does not derive prices when first group has no volume', async () => {
@@ -232,5 +260,23 @@ describe('TpexEsbHistoryProvider', () => {
 
     expect(either._tag).toBe('Left');
     expect(cache.setJson).not.toHaveBeenCalled();
+  });
+
+  it('maps Redis failures to a typed StockHistoryCacheError instead of bypassing upstream', async () => {
+    const failing = {
+      getJson: () => Effect.fail(new RedisCommandError('GET', 'boom')),
+      setJson: () => Effect.succeed(undefined),
+      del: () => Effect.succeed(undefined),
+    } as unknown as TestCache;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ stat: 'ok', data: [] }), { status: 200 })));
+
+    const either = await Effect.runPromise(
+      Effect.either(createProvider(failing).getDailyHistory(ESB_SECURITY, '2026-08-01', '2026-08-31')),
+    );
+
+    expect(either._tag).toBe('Left');
+    if (either._tag === 'Left') {
+      expect(either.left._tag).toBe('StockHistoryCacheError');
+    }
   });
 });

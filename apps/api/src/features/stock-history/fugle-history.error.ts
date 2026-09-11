@@ -18,6 +18,8 @@ export class OfficialDailyHistoryError extends Data.TaggedError('OfficialDailyHi
   readonly cause?: unknown;
 }> {}
 
+export class StockHistoryCacheError extends Data.TaggedError('StockHistoryCacheError') {}
+
 export class StockHistoryNotFoundError extends Data.TaggedError('StockHistoryNotFoundError')<{
   readonly symbol: string;
 }> {}
@@ -37,4 +39,5 @@ export type StockHistoryServiceError =
   | FugleHistoryError
   | OfficialDailyHistoryError
   | StockHistoryNotFoundError
-  | IntradayRangeUnavailableError;
+  | IntradayRangeUnavailableError
+  | StockHistoryCacheError;

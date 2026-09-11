@@ -2,8 +2,9 @@ import { Effect, Either } from 'effect';
 import type { Security } from '@tw-stock-dashboard/contracts';
 import { StockNotFoundError } from '../../libs/securities/universe.error.js';
 import type { UniverseResolver } from '../../libs/securities/universe.resolver.js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CacheService } from '../../libs/cache/cache.service.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
 import type { PinoLogger } from 'nestjs-pino';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
 import { FugleQuoteProvider } from './fugle-quote.provider.js';
@@ -13,6 +14,16 @@ import { StockQuoteController } from './stock-quote.controller.js';
 import { StockQuoteService } from './stock-quote.service.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
+
+import {
+  createTestCacheService,
+  flushProjectRedisKeys,
+} from '../../libs/cache/cache-test.helper.js';
+
+beforeEach(async () => {
+  await flushProjectRedisKeys();
+});
+
 vi.mock('../../libs/observability/tracing.js', () => ({
   addSpanEvent: vi.fn(),
   setSpanAttributes: vi.fn(),
@@ -22,13 +33,19 @@ function silentLogger(): PinoLogger {
   return { info: () => {}, warn: () => {}, error: () => {} } as unknown as PinoLogger;
 }
 
+let testCache: CacheService;
+
+beforeAll(async () => {
+  testCache = await createTestCacheService();
+});
+
 function service() {
   return new StockQuoteService(
     new FugleQuoteProvider(),
     new TwseMisQuoteProvider(),
-    new OfficialDailyQuoteProvider(new CacheService()),
-    new TpexEsbQuoteProvider(new CacheService()),
-    new StockQuoteCache(),
+    new OfficialDailyQuoteProvider(new WindowCacheService(testCache)),
+    new TpexEsbQuoteProvider(new WindowCacheService(testCache)),
+    new StockQuoteCache(new WindowCacheService(testCache)),
     fakeUniverse(),
     silentLogger(),
   );

@@ -2,39 +2,42 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Clock, Effect, Either } from 'effect';
 import { PinoLogger } from 'nestjs-pino';
 import type {
+  Security,
   StockQuoteBatchItem,
   StockQuoteBatchResponse,
   StockQuoteProvider,
   StockQuoteResponse,
 } from '@tw-stock-dashboard/contracts';
 import type { FugleQuoteError } from './fugle-quote.error.js';
-import { FugleQuoteProvider } from './fugle-quote.provider.js';
+import { FugleQuoteProvider, isFugleConfigured } from './fugle-quote.provider.js';
 import { OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
 import type { OfficialDailyQuoteError } from './official-daily-quote.error.js';
-import { StockQuoteCache } from './stock-quote.cache.js';
+import { StockQuoteCache, type StockQuoteMode } from './stock-quote.cache.js';
 import type { QuoteProviderResult } from './quote-provider.js';
 import { addSpanEvent, setSpanAttributes } from '../../libs/observability/tracing.js';
-import type { UniverseUnavailableError } from '../../libs/securities/universe.error.js';
-import { StockNotFoundError } from '../../libs/securities/universe.error.js';
+import { StockNotFoundError, UniverseUnavailableError } from '../../libs/securities/universe.error.js';
 import { UniverseResolver } from '../../libs/securities/universe.resolver.js';
 import type { TwseMisQuoteError } from './twse-mis-quote.error.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 import type { TpexEsbQuoteError } from './tpex-esb-quote.error.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import type { CacheInfrastructureError } from '../../libs/cache/cache.service.js';
+import type { WindowCoordinationTimeoutError } from '../../libs/cache/window-cache.error.js';
 
-type StockQuoteFailure =
+export type StockQuoteFailure =
   | FugleQuoteError
   | TwseMisQuoteError
   | OfficialDailyQuoteError
   | TpexEsbQuoteError
   | StockNotFoundError
-  | UniverseUnavailableError;
+  | UniverseUnavailableError
+  | CacheInfrastructureError
+  | WindowCoordinationTimeoutError;
 
-// Application seam: TTL cache in front of Fugle, TWSE MIS, and official daily
-// fallback workflows, with source metadata assembled in one place.
-// Only normalized successes are cached — failures skip the write and the next
-// request retries upstream. Lookup runs before any provider, so a cached quote
-// is served even if the key was removed afterwards, until TTL.
+// Application seam: Redis window-cache in front of Fugle, TWSE MIS, and official
+// daily fallback workflows, with source metadata assembled in one place.
+// Freshness is windowId. Fugle mode is selected before lookup so enhanced and
+// public namespaces never reuse each other.
 // Request correlation comes free: PinoLogger binds the request-scoped child
 // logger (request_id) wherever a request context exists.
 // NOTE: @Inject is explicit because vitest (esbuild) does not emit
@@ -55,25 +58,39 @@ export class StockQuoteService {
       // Universe first: unknown symbols fail 404/503 here, and the resolved
       // market selects the provider — ESB never touches Fugle or MIS.
       const security = yield* this.universe.resolve(symbol);
-      const lookupTime = yield* Clock.currentTimeMillis;
-      const hit = this.cache.get(symbol, lookupTime);
-      if (hit) {
-        // Cache hits preserve the original provenance; only the flag flips.
-        // No TTL extension, no fetchedAt/asOf rewrite, no mutation — and no
-        // fallback event: replaying history is not a new fallback.
-        const cached = { ...hit, source: { ...hit.source, cacheHit: true } };
-        setSpanAttributes(servedSpanAttributes(cached.source.provider, cached.source.fallbackUsed, true));
-        addSpanEvent('market_data.quote_served', servedSpanAttributes(cached.source.provider, cached.source.fallbackUsed, true));
-        this.logger.info({
-          event: 'market_data_quote_served',
-          operation: 'quote',
-          symbol,
-          provider: cached.source.provider,
-          fallback_used: cached.source.fallbackUsed,
-          cache_hit: true,
-        });
-        return cached;
-      }
+      const mode: StockQuoteMode = isFugleConfigured() ? 'enhanced' : 'public';
+      const response = yield* this.cache.getOrLoad({
+        symbol,
+        mode,
+        load: () => this.orchestrateQuote(security),
+      });
+
+      setSpanAttributes(servedSpanAttributes(response.source.provider, response.source.fallbackUsed, response.source.cacheHit));
+      addSpanEvent(
+        'market_data.quote_served',
+        servedSpanAttributes(response.source.provider, response.source.fallbackUsed, response.source.cacheHit),
+      );
+      this.logger.info({
+        event: 'market_data_quote_served',
+        operation: 'quote',
+        symbol,
+        provider: response.source.provider,
+        fallback_used: response.source.fallbackUsed,
+        cache_hit: response.source.cacheHit,
+      });
+
+      return response;
+    });
+  }
+
+  private orchestrateQuote(
+    security: Security,
+  ): Effect.Effect<
+    StockQuoteResponse,
+    FugleQuoteError | TwseMisQuoteError | OfficialDailyQuoteError | TpexEsbQuoteError | StockNotFoundError
+  > {
+    return Effect.gen(this, function* () {
+      const symbol = security.symbol;
       if (security.market === 'ESB') {
         const esb = yield* this.tpexEsbQuoteProvider.getQuote(symbol);
         const completed = {
@@ -82,7 +99,7 @@ export class StockQuoteService {
           fallbackUsed: false,
           fallbackReason: null,
         } as const;
-        return yield* this.assemble(symbol, completed);
+        return yield* this.assemble(completed);
       }
       const completed = yield* this.fugleQuoteProvider.getQuote(symbol).pipe(
         Effect.map(
@@ -119,30 +136,7 @@ export class StockQuoteService {
                 return Effect.fail(error);
               }
               const fallback = fallbackReason(error);
-              const toProvider = officialDailyProvider(officialMarket);
-              const logPayload = {
-                event: 'market_data_fallback',
-                operation: 'quote',
-                symbol,
-                from_provider: 'fugle',
-                to_provider: toProvider,
-                fallback_reason: 'config_missing' as const,
-                ...fallback,
-              };
-              this.logger.info(logPayload);
-              addSpanEvent('market_data.fallback', {
-                'stock.symbol': symbol,
-                'market_data.from_provider': 'fugle',
-                'market_data.to_provider': toProvider,
-                'market_data.reason': fallback.reason,
-                'market_data.reason_type': 'config_missing',
-              });
-              return Effect.map(this.officialDailyQuoteProvider.getQuote(symbol, officialMarket), (result) => ({
-                ...result,
-                provider: toProvider,
-                fallbackUsed: true,
-                fallbackReason: 'config_missing' as const,
-              }));
+              return this.resolvePublicDataQuote(symbol, officialMarket, fallback);
             }
 
             const fallback = fallbackReason(error);
@@ -173,11 +167,13 @@ export class StockQuoteService {
           },
         ),
       );
-      return yield* this.assemble(symbol, completed);
+      return yield* this.assemble(completed);
     });
   }
 
-  getQuotes(symbols: readonly string[]): Effect.Effect<StockQuoteBatchResponse, never> {
+  getQuotes(
+    symbols: readonly string[],
+  ): Effect.Effect<StockQuoteBatchResponse, CacheInfrastructureError | UniverseUnavailableError> {
     return Effect.gen(this, function* () {
       // One bounded batch request avoids a browser-side N+1 API pattern while
       // preserving independent per-symbol failure states.
@@ -185,6 +181,25 @@ export class StockQuoteService {
         symbols.map((symbol) => Effect.either(this.getQuote(symbol))),
         { concurrency: 4 },
       );
+      // Global Redis outage: if Redis connection is dead or throwing command errors,
+      // fail the entire batch closed with 503.
+      const redisOutage = outcomes.find(
+        (outcome): outcome is Either.Left<CacheInfrastructureError, StockQuoteResponse> =>
+          Either.isLeft(outcome) &&
+          (outcome.left._tag === 'RedisConnectionError' || outcome.left._tag === 'RedisCommandError'),
+      );
+      if (redisOutage) {
+        return yield* Effect.fail(redisOutage.left);
+      }
+      // If the universe is completely unavailable for all symbols, fail the batch with 503.
+      if (
+        outcomes.length > 0 &&
+        outcomes.every((outcome) => Either.isLeft(outcome) && outcome.left._tag === 'UniverseUnavailableError')
+      ) {
+        return yield* Effect.fail(new UniverseUnavailableError());
+      }
+      // Per-symbol problems (single-symbol lock timeout, provider failure, not found, etc.)
+      // resolve as individual item statuses within an HTTP 200 batch response.
       const items: StockQuoteBatchItem[] = symbols.map((symbol, index) => {
         const outcome = outcomes[index]!;
         if (Either.isRight(outcome)) {
@@ -196,10 +211,102 @@ export class StockQuoteService {
     });
   }
 
-  // Shared response assembly: provenance stamping, TTL insertion, and the
-  // served log/span event. Providers stay focused on normalized quotes.
-  private assemble(
+  // Public Data Mode (no Fugle key): official daily EOD plus TWSE MIS as a
+  // completed-session freshness candidate. A MIS snapshot counts as a closed
+  // candidate only with proof of a completed close: session time >= 13:30 on
+  // a prior date, or the same proof observed after today's 13:35 settlement
+  // grace. Missing/invalid session time can never override official — date
+  // alone is not proof of a completed session. Between two closed snapshots
+  // the newer tradeDate wins either direction. MIS is auxiliary: its failure
+  // never breaks Public Data availability. fallbackReason stays
+  // config_missing because the frontend keys Public Data Mode off it.
+  private resolvePublicDataQuote(
     symbol: string,
+    market: 'TWSE' | 'TPEX',
+    fallback: FallbackReason,
+  ): Effect.Effect<
+    QuoteProviderResult & {
+      readonly provider: 'twse-openapi' | 'tpex-openapi' | 'twse-mis';
+      readonly fallbackUsed: true;
+      readonly fallbackReason: 'config_missing';
+    },
+    OfficialDailyQuoteError
+  > {
+    return Effect.gen(this, function* () {
+      const nowMs = yield* Clock.currentTimeMillis;
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Taipei',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).formatToParts(new Date(nowMs));
+      const byType: Record<string, string> = {};
+      for (const part of parts) {
+        byType[part.type] = part.value;
+      }
+      const today = `${byType.year}-${byType.month}-${byType.day}`;
+      const nowTime = `${byType.hour}:${byType.minute}:${byType.second}`;
+      const official = yield* this.officialDailyQuoteProvider.getQuote(symbol, market);
+      const mis = yield* this.twseMisQuoteProvider.getQuote(symbol).pipe(
+        Effect.asSome,
+        Effect.catchAll(() => Effect.succeedNone),
+      );
+      const misResult = mis._tag === 'Some' ? mis.value : null;
+      const misDate = misResult?.quote.tradeDate ?? null;
+      const misTime = misResult?.sessionTime ?? null;
+      let winner: {
+        result: QuoteProviderResult;
+        provider: 'twse-openapi' | 'tpex-openapi' | 'twse-mis';
+      };
+      if (
+        misResult !== null &&
+        misDate !== null &&
+        misTime !== null &&
+        misTime >= '13:30:00' &&
+        (misDate < today || (misDate === today && nowTime >= '13:35:00')) &&
+        (official.quote.tradeDate === null || misDate > official.quote.tradeDate)
+      ) {
+        winner = { result: misResult, provider: 'twse-mis' };
+      } else {
+        winner = {
+          result: official,
+          provider: market === 'TWSE' ? 'twse-openapi' : 'tpex-openapi',
+        };
+      }
+      const logPayload = {
+        event: 'market_data_fallback',
+        operation: 'quote',
+        symbol,
+        from_provider: 'fugle',
+        to_provider: winner.provider,
+        fallback_reason: 'config_missing' as const,
+        ...fallback,
+      };
+      this.logger.info(logPayload);
+      addSpanEvent('market_data.fallback', {
+        'stock.symbol': symbol,
+        'market_data.from_provider': 'fugle',
+        'market_data.to_provider': winner.provider,
+        'market_data.reason': fallback.reason,
+        'market_data.reason_type': 'config_missing',
+      });
+      return {
+        ...winner.result,
+        provider: winner.provider,
+        fallbackUsed: true as const,
+        fallbackReason: 'config_missing' as const,
+      };
+    });
+  }
+
+  // Shared response assembly: provenance stamping with initial cacheHit=false.
+  // WindowCacheService owns cache coordination; served log/span events are
+  // emitted at the service boundary so hits and misses are coherent.
+  private assemble(
     completed: QuoteProviderResult & {
       readonly provider: StockQuoteProvider;
       readonly fallbackUsed: boolean;
@@ -207,8 +314,6 @@ export class StockQuoteService {
     },
   ): Effect.Effect<StockQuoteResponse, never> {
     return Effect.gen(this, function* () {
-      // fetchedAt marks when the winning provider completed — consistent with
-      // the TTL insertion instant, never the request start.
       const fetchedAt = yield* Clock.currentTimeMillis;
       const response: StockQuoteResponse = {
         ...completed.quote,
@@ -221,17 +326,6 @@ export class StockQuoteService {
           cacheHit: false,
         },
       };
-      this.cache.set(symbol, response, fetchedAt);
-      setSpanAttributes(servedSpanAttributes(response.source.provider, response.source.fallbackUsed, false));
-      addSpanEvent('market_data.quote_served', servedSpanAttributes(response.source.provider, response.source.fallbackUsed, false));
-      this.logger.info({
-        event: 'market_data_quote_served',
-        operation: 'quote',
-        symbol,
-        provider: response.source.provider,
-        fallback_used: response.source.fallbackUsed,
-        cache_hit: false,
-      });
       return response;
     });
   }
@@ -241,7 +335,14 @@ function batchError(error: StockQuoteFailure): NonNullable<StockQuoteBatchItem['
   if (error._tag === 'StockNotFoundError') {
     return 'not_found';
   }
-  if (error._tag === 'UniverseUnavailableError') {
+  if (
+    error._tag === 'UniverseUnavailableError' ||
+    error._tag === 'RedisCommandError' ||
+    error._tag === 'RedisConnectionError' ||
+    error._tag === 'WindowCoordinationTimeoutError' ||
+    error._tag === 'TpexEsbCacheError' ||
+    (error._tag === 'OfficialDailyQuoteError' && error.stage === 'cache')
+  ) {
     return 'unavailable';
   }
   return 'failed';
@@ -284,9 +385,6 @@ function fallbackReason(error: FugleQuoteError): FallbackReason {
   }
 }
 
-function officialDailyProvider(market: 'TWSE' | 'TPEX'): Extract<StockQuoteProvider, 'twse-openapi' | 'tpex-openapi'> {
-  return market === 'TWSE' ? 'twse-openapi' : 'tpex-openapi';
-}
 function servedSpanAttributes(provider: StockQuoteProvider, fallbackUsed: boolean, cacheHit: boolean) {
   return {
     'market_data.provider': provider,

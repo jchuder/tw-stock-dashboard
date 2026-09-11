@@ -1,0 +1,101 @@
+name: Sync Main to Dev
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-to-dev-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'hotfix/') &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create repository automation token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Checkout dev
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Detect whether main needs syncing
+        id: sync-state
+        shell: bash
+        run: |
+          git fetch origin main dev
+          echo "dev-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "dev already contains main."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure automation Git identity
+        if: steps.sync-state.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        shell: bash
+        run: |
+          bot_login="${APP_SLUG}[bot]"
+          bot_id="$(gh api "/users/${bot_login}" --jq .id)"
+          git config user.name "$bot_login"
+          git config user.email "${bot_id}+${bot_login}@users.noreply.github.com"
+
+      - name: Merge main into dev
+        if: steps.sync-state.outputs.needed == 'true'
+        shell: bash
+        run: |
+          if ! git merge --no-ff --no-edit origin/main; then
+            git merge --abort || true
+            echo "main → dev has conflicts. Resolve them on a dedicated sync branch and use a normal PR to dev." >&2
+            exit 1
+          fi
+
+      - name: Setup pnpm and Node.js
+        if: steps.sync-state.outputs.needed == 'true'
+        uses: pnpm/setup@v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          install: true
+
+      - name: Validate synced commits
+        if: steps.sync-state.outputs.needed == 'true'
+        env:
+          DEV_SHA: ${{ steps.sync-state.outputs.dev-sha }}
+        run: pnpm commitlint --from "$DEV_SHA" --to HEAD --verbose
+
+      - name: Quality gate
+        if: steps.sync-state.outputs.needed == 'true'
+        shell: bash
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Push clean back-merge to dev
+        if: steps.sync-state.outputs.needed == 'true'
+        run: git push origin HEAD:dev

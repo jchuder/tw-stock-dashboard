@@ -18,6 +18,11 @@ import { UPSTREAM_TIMEOUT_MS } from './upstream-timeout.js';
 const FUGLE_QUOTE_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote';
 const FUGLE_TICKER_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/ticker';
 
+export function isFugleConfigured(): boolean {
+  const apiKey = process.env.FUGLE_API_KEY?.trim();
+  return Boolean(apiKey && apiKey !== 'your_fugle_api_key_here');
+}
+
 // Fugle primary is one normalized quote workflow over two intraday endpoints:
 // Quote (session OHLCV) + Ticker (limit prices, reference). They are fetched
 // concurrently; a failure in either follows the same provider/error policy,
@@ -27,10 +32,10 @@ const FUGLE_TICKER_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/ti
 export class FugleQuoteProvider implements QuoteProvider<FugleQuoteError> {
   getQuote(symbol: string): Effect.Effect<QuoteProviderResult, FugleQuoteError> {
     return Effect.gen(function* () {
-      const apiKey = process.env.FUGLE_API_KEY?.trim();
-      if (!apiKey || apiKey === 'your_fugle_api_key_here') {
+      if (!isFugleConfigured()) {
         return yield* new FugleConfigError();
       }
+      const apiKey = process.env.FUGLE_API_KEY!.trim();
 
       const encoded = encodeURIComponent(symbol);
       // Both outcomes are collected before deciding: Effect.all fail-fast

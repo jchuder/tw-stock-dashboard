@@ -16,6 +16,7 @@ import {
   StockWatchlistPanel,
 } from '../../../features/stock-watchlist/index.js';
 import type { WatchlistDisplayItem } from '../../../features/stock-watchlist/index.js';
+import { getMarketOverviewRefetchInterval } from '../../../shared/datetime/format-taipei.js';
 
 function isIntradayRange(range: HistoryRange): boolean {
   return range === '1d' || range === '3d' || range === '5d';
@@ -99,7 +100,9 @@ export function StockAnalysis({
     queryKey: ['watchlist-quotes', watchlistQuerySymbols],
     queryFn: () => fetchStockQuoteBatches(watchlistSymbols),
     enabled: watchlistSymbols.length > 0,
-    refetchInterval: 15_000,
+    // Same trading-window schedule as Market Overview: 30s polls intraday,
+    // paused (wake at next 08:55) when closed to save upstream quota.
+    refetchInterval: () => getMarketOverviewRefetchInterval(),
     staleTime: 10_000,
     retry: false,
   });
@@ -212,7 +215,7 @@ export function StockAnalysis({
               <span className="public-data-banner-text">
                 {validatedMarket === 'ESB'
                   ? '報價來自 TPEx 興櫃官方公開資料；目前提供官方日均價歷史走勢，暫不提供 5 分 K。'
-                  : '報價來自 TWSE / TPEx 官方盤後日線；歷史 K 線同樣使用交易所官方盤後日線。如需即時 5 分 K 與高頻盤中走勢，請設定 Fugle API Key。'}
+                  : '報價來自 TWSE / TPEx 官方公開收盤資料（盤後日線為主，尚未更新時以已收盤 MIS 資料補齊）；歷史 K 線使用交易所官方盤後日線。如需即時 5 分 K 與高頻盤中走勢，請設定 Fugle API Key。'}
               </span>
             </div>
           )}

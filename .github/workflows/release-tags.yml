@@ -1,0 +1,91 @@
+name: Release Tags
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/**/package.json'
+      - 'packages/**/package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v2.1.0
+        with:
+          runtime: node@24
+          cache: true
+          install: true
+
+      - name: Find package version changes
+        id: versions
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        shell: bash
+        run: |
+          base_sha="$BEFORE_SHA"
+          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+            base_sha="HEAD^"
+          fi
+
+          node --input-type=module - "$base_sha" <<'NODE' > /tmp/version-tags.txt
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+
+          const base = process.argv[2];
+          const changed = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' })
+            .trim()
+            .split('\n')
+            .filter((path) => /^(apps|packages)\/[^/]+\/package\.json$/.test(path));
+
+          for (const path of changed) {
+            const current = JSON.parse(readFileSync(path, 'utf8'));
+            let previous;
+            try {
+              previous = JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { encoding: 'utf8' }));
+            } catch {
+              continue;
+            }
+
+            if (previous.version !== current.version) {
+              console.log(`${current.name}@${current.version}`);
+            }
+          }
+          NODE
+
+          if [ -s /tmp/version-tags.txt ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Version tags to publish:"
+            cat /tmp/version-tags.txt
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No workspace package version changed."
+          fi
+
+      - name: Create Changesets tags
+        if: steps.versions.outputs.found == 'true'
+        shell: bash
+        run: pnpm release:tags
+
+      - name: Push changed package tags
+        if: steps.versions.outputs.found == 'true'
+        shell: bash
+        run: |
+          while IFS= read -r tag; do
+            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "Expected Changesets tag was not created: $tag" >&2
+              exit 1
+            fi
+            git push origin "refs/tags/$tag"
+          done < /tmp/version-tags.txt

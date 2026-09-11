@@ -9,7 +9,20 @@ import { CacheModule } from '../../libs/cache/cache.module.js';
 import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { UniverseModule } from '../../libs/securities/universe.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
-import { TPEX_DAILY_QUOTE_URL, TWSE_DAILY_QUOTE_URL } from './official-daily-quote.provider.js';
+import { TPEX_DAILY_QUOTE_URL, TWSE_DAILY_QUOTE_URL, OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
+import { OfficialDailyQuoteError } from './official-daily-quote.error.js';
+import { TpexEsbCacheError } from './tpex-esb-quote.error.js';
+import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
+import { RedisConnectionError } from '../../libs/cache/redis.error.js';
+import { WindowCoordinationTimeoutError } from '../../libs/cache/window-cache.error.js';
+import { Effect } from 'effect';
+
+import { flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
+
+beforeEach(async () => {
+  await flushProjectRedisKeys();
+});
+
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
   return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
 }
@@ -164,6 +177,7 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -226,7 +240,9 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       },
     );
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    // MIS is probed as a completed-session freshness candidate; without a
+    // session date it loses to the official snapshot.
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
     expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
   });
 
@@ -255,7 +271,8 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
       },
     });
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    // MIS entry targets another symbol, so the candidate is unusable here.
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
     expect(callsTo(fetchMock, TPEX_DAILY_QUOTE_URL)).toBe(1);
   });
 
@@ -396,13 +413,13 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 
-  it('uses official daily data instead of Fugle or MIS when the key is missing', async () => {
+  it('probes MIS as a freshness candidate but serves official daily when MIS has no session date', async () => {
     const fetchMock = mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
 
     await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(200);
 
     expect(callsTo(fetchMock, 'api.fugle.tw')).toBe(0);
-    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
+    expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(1);
     expect(callsTo(fetchMock, TWSE_DAILY_QUOTE_URL)).toBe(1);
   });
 
@@ -660,6 +677,109 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
     expect(res.body).toMatchObject({
       statusCode: 400,
       message: 'symbols query is required',
+    });
+  });
+
+  it('maps official quote cache errors to HTTP 503', async () => {
+    // Deterministic upstreams: the universe rebuild after the per-test Redis
+    // flush must not touch the real network (MIS stays a live candidate).
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const officialProvider = app.get(OfficialDailyQuoteProvider);
+    vi.spyOn(officialProvider, 'getQuote').mockReturnValue(
+      Effect.fail(new OfficialDailyQuoteError({ market: 'TWSE', stage: 'cache' })),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/2330/quote').expect(503);
+
+    expect(res.body).toMatchObject({
+      statusCode: 503,
+      message: 'Market data cache temporarily unavailable',
+    });
+  });
+
+  it('maps ESB quote cache errors (TpexEsbCacheError) to HTTP 503', async () => {
+    // Same as above: universe rebuild must resolve from fixture, never network.
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const esbProvider = app.get(TpexEsbQuoteProvider);
+    vi.spyOn(esbProvider, 'getQuote').mockReturnValue(
+      Effect.fail(new TpexEsbCacheError()),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/v1/stocks/7883/quote').expect(503);
+
+    expect(res.body).toMatchObject({
+      statusCode: 503,
+      message: 'Market data cache temporarily unavailable',
+    });
+  });
+
+  it('maps global Redis outage to HTTP 503 for the entire batch', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const quoteCache = app.get(StockQuoteCache);
+    vi.spyOn(quoteCache, 'getOrLoad').mockReturnValue(
+      Effect.fail(new RedisConnectionError('ECONNREFUSED')),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,7883' })
+      .expect(503);
+
+    expect(res.body).toMatchObject({
+      statusCode: 503,
+      message: 'Market data cache temporarily unavailable',
+    });
+  });
+
+  it('isolates per-symbol coordination failure in batch to item error unavailable with HTTP 200', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const esbProvider = app.get(TpexEsbQuoteProvider);
+    vi.spyOn(esbProvider, 'getQuote').mockReturnValue(
+      Effect.fail(new TpexEsbCacheError()),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,7883' })
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0]).toMatchObject({
+      symbol: '2330',
+      error: null,
+    });
+    expect(res.body.items[1]).toEqual({
+      symbol: '7883',
+      quote: null,
+      error: 'unavailable',
+    });
+  });
+
+  it('isolates per-symbol WindowCoordinationTimeoutError in batch to item error unavailable with HTTP 200', async () => {
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
+    const quoteCache = app.get(StockQuoteCache);
+    const originalGetOrLoad = quoteCache.getOrLoad.bind(quoteCache);
+    vi.spyOn(quoteCache, 'getOrLoad').mockImplementation((params) => {
+      if (params.symbol === '2317') {
+        return Effect.fail(new WindowCoordinationTimeoutError('key:2317', 10500));
+      }
+      return originalGetOrLoad(params);
+    });
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/stocks/quotes')
+      .query({ symbols: '2330,2317' })
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0]).toMatchObject({
+      symbol: '2330',
+      error: null,
+    });
+    expect(res.body.items[1]).toEqual({
+      symbol: '2317',
+      quote: null,
+      error: 'unavailable',
     });
   });
 });

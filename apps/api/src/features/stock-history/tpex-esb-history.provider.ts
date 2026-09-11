@@ -1,11 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Duration, Effect } from 'effect';
 import type { Security } from '@tw-stock-dashboard/contracts';
-import { CacheService } from '../../libs/cache/cache.service.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
+import { monthlyHistoryKey } from '../../libs/cache/window-cache.policies.js';
 import { enumerateMonths } from './history-window.js';
-import { OfficialDailyHistoryError } from './fugle-history.error.js';
+import { resolveHistoryPolicy } from './official-daily-history.provider.js';
+import { OfficialDailyHistoryError, StockHistoryCacheError } from './fugle-history.error.js';
 import type { AverageBasisCandle } from './moving-average.js';
-import { monthlyHistoryCacheKey, monthlyHistoryCacheTtl } from './official-daily-history.provider.js';
 
 export const TPEX_ESB_HISTORICAL_URL = 'https://www.tpex.org.tw/www/zh-tw/emerging/historical';
 const UPSTREAM_TIMEOUT_MS = 3000;
@@ -166,13 +167,13 @@ function parseCachedCandles(value: unknown): AverageBasisCandle[] | undefined {
 
 @Injectable()
 export class TpexEsbHistoryProvider {
-  constructor(@Inject(CacheService) private readonly cache: CacheService) {}
+  constructor(@Inject(WindowCacheService) private readonly windows: WindowCacheService) {}
 
   getDailyHistory(
     security: Security,
     from: string,
     to: string,
-  ): Effect.Effect<TpexEsbHistoryResult, OfficialDailyHistoryError> {
+  ): Effect.Effect<TpexEsbHistoryResult, OfficialDailyHistoryError | StockHistoryCacheError> {
     const months = enumerateMonths(from, to);
     if (months.length === 0) {
       return Effect.fail(new OfficialDailyHistoryError({ cause: 'empty months' }));
@@ -195,8 +196,11 @@ export class TpexEsbHistoryProvider {
     });
   }
 
-  private fetchMonth(symbol: string, month: string): Effect.Effect<AverageBasisCandle[], OfficialDailyHistoryError> {
-    const key = monthlyHistoryCacheKey('esb', symbol, month);
+  private fetchMonth(
+    symbol: string,
+    month: string,
+  ): Effect.Effect<AverageBasisCandle[], OfficialDailyHistoryError | StockHistoryCacheError> {
+    const key = monthlyHistoryKey('esb', symbol, month);
     return this.withMonthlyCache(key, month, this.fetchMonthUpstream(symbol, month));
   }
 
@@ -242,15 +246,22 @@ export class TpexEsbHistoryProvider {
     key: string,
     month: string,
     upstream: Effect.Effect<AverageBasisCandle[], OfficialDailyHistoryError>,
-  ): Effect.Effect<AverageBasisCandle[], OfficialDailyHistoryError> {
+  ): Effect.Effect<AverageBasisCandle[], OfficialDailyHistoryError | StockHistoryCacheError> {
+    const policy = resolveHistoryPolicy(month);
     return Effect.gen(this, function* () {
-      const cached = parseCachedCandles(yield* this.cache.getJson(key));
-      if (cached !== undefined) {
-        return cached;
-      }
-      const candles = yield* upstream;
-      yield* this.cache.setJson(key, candles, monthlyHistoryCacheTtl(month));
-      return candles;
+      const coordinated = yield* this.windows
+        .getOrLoad({
+          key,
+          policy,
+          decode: (raw) => parseCachedCandles(raw) ?? null,
+          load: () => upstream,
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            cause instanceof OfficialDailyHistoryError ? cause : new StockHistoryCacheError(),
+          ),
+        );
+      return coordinated.value;
     });
   }
 }

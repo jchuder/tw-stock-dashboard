@@ -10,6 +10,12 @@ import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { UniverseModule } from '../../libs/securities/universe.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
 
+import { flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
+
+beforeEach(async () => {
+  await flushProjectRedisKeys();
+});
+
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
   return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
 }

@@ -1,7 +1,9 @@
 import { Effect, Either } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CacheService } from '../../libs/cache/cache.service.js';
+import { RedisCommandError } from '../../libs/cache/redis.error.js';
 import { OfficialDailyQuoteProvider } from './official-daily-quote.provider.js';
+import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
 
 const TWSE_ROW = {
   Date: '1150904',
@@ -27,14 +29,35 @@ const TPEX_ROW = {
   Change: '+1.23',
 };
 
-type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del'>;
+type TestCache = Pick<CacheService, 'getJson' | 'setJson' | 'del' | 'setNxPx' | 'releaseLockIfOwner'>;
 
 function makeCache(initial: Record<string, unknown> = {}): TestCache {
-  const values = new Map(Object.entries(initial));
+  // Seeds are stored as fresh coordination envelopes, exactly like real
+  // writers store them; the window layer (not the fake) owns freshness.
+  const windowId = Math.floor(Date.now() / 30_000);
+  const storedAt = new Date().toISOString();
+  const locks = new Set<string>();
+  const values = new Map(
+    Object.entries(initial).map(([key, value]): [string, unknown] => [
+      key,
+      { version: 1 as const, windowId, storedAt, value },
+    ]),
+  );
   return {
     getJson: (key) => Effect.succeed(values.get(key) ?? null),
     setJson: (key, value) => Effect.sync(() => void values.set(key, value)),
     del: (key) => Effect.sync(() => void values.delete(key)),
+    setNxPx: (key: string) => {
+      if (locks.has(key)) {
+        return Effect.succeed(false);
+      }
+      locks.add(key);
+      return Effect.succeed(true);
+    },
+    releaseLockIfOwner: (key: string) => {
+      locks.delete(key);
+      return Effect.succeed(1);
+    },
   };
 }
 
@@ -43,7 +66,7 @@ function run(
   market: 'TWSE' | 'TPEX',
   cache = makeCache(),
 ): Promise<Either.Either<{ quote: unknown; asOf: string | null }, unknown>> {
-  return Effect.runPromise(Effect.either(new OfficialDailyQuoteProvider(cache).getQuote(symbol, market)));
+  return Effect.runPromise(Effect.either(new OfficialDailyQuoteProvider(new WindowCacheService(cache)).getQuote(symbol, market)));
 }
 
 afterEach(() => {
@@ -121,6 +144,22 @@ describe('OfficialDailyQuoteProvider', () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toMatchObject({ _tag: 'OfficialDailyQuoteError', market: 'TWSE', stage: 'value' });
+    }
+  });
+
+  it('maps Redis failures to a cache-stage error instead of bypassing upstream', async () => {
+    const failing = {
+      getJson: () => Effect.fail(new RedisCommandError('GET', 'boom')),
+      setJson: () => Effect.succeed(undefined),
+      del: () => Effect.succeed(undefined),
+    } as unknown as TestCache;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([TWSE_ROW]), { status: 200 })));
+
+    const result = await run('2330', 'TWSE', failing);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({ _tag: 'OfficialDailyQuoteError', market: 'TWSE', stage: 'cache' });
     }
   });
 });

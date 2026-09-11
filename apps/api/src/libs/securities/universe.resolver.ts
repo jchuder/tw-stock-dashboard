@@ -1,16 +1,25 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { Effect, Schema } from 'effect';
+import { Effect, Either, Schema } from 'effect';
+import { WindowCacheService } from '../cache/window-cache.service.js';
+import {
+  UNIVERSE_KEY,
+  UNIVERSE_LKG_KEY,
+  UNIVERSE_LKG_TTL_SECONDS,
+  UNIVERSE_POLICY,
+} from '../cache/window-cache.policies.js';
 import type { Security } from '@tw-stock-dashboard/contracts';
 import { SecuritySchema } from '@tw-stock-dashboard/contracts';
 import type { UniverseCache } from './universe-cache.port.js';
 import { UNIVERSE_CACHE_TOKEN } from './universe-cache.port.js';
 import { StockNotFoundError, UniverseUnavailableError } from './universe.error.js';
-import { UniverseProvider } from './universe.provider.js';
+import { UniverseProvider, type UniverseBuild } from './universe.provider.js';
 
-export const UNIVERSE_CACHE_KEY = 'security-universe:v1';
-export const UNIVERSE_LKG_CACHE_KEY = 'security-universe:lkg:v1';
-export const UNIVERSE_TTL_SECONDS = 24 * 60 * 60;
-export const UNIVERSE_LKG_TTL_SECONDS = 7 * 24 * 60 * 60;
+// Control-flow signal, not a user-facing error: a partial upstream build must
+// resolve through the LKG merge path without being cached as canonical.
+class UniverseBuildIncomplete {
+  readonly _tag = 'UniverseBuildIncomplete';
+  constructor(readonly build: UniverseBuild) {}
+}
 
 const log = new Logger('UniverseResolver');
 
@@ -25,6 +34,14 @@ function indexBySymbol(securities: ReadonlyArray<Security>): Record<string, Secu
   return Object.fromEntries(securities.map((s) => [s.symbol, s]));
 }
 
+function decodeCompleteUniverse(raw: unknown): Security[] | null {
+  if (raw === null) {
+    return null;
+  }
+  const decoded = Schema.decodeUnknownEither(Schema.Array(SecuritySchema))(raw);
+  return decoded._tag === 'Right' ? [...decoded.right] : null;
+}
+
 // Process-local in-flight build: concurrent cache misses share one upstream
 // rebuild instead of stampeding five official endpoints each.
 let inflight: Promise<LoadedUniverse> | null = null;
@@ -34,6 +51,7 @@ export class UniverseResolver {
   constructor(
     @Inject(UNIVERSE_CACHE_TOKEN) private readonly cache: UniverseCache,
     @Inject(UniverseProvider) private readonly provider: UniverseProvider,
+    @Inject(WindowCacheService) private readonly windows: WindowCacheService,
   ) {}
 
   resolve(symbol: string): Effect.Effect<Security, StockNotFoundError | UniverseUnavailableError> {
@@ -77,32 +95,72 @@ export class UniverseResolver {
         inflight = null;
       });
       return inflight;
-    });
+    }).pipe(
+      // The Promise boundary can only carry UniverseUnavailableError as a
+      // rejection (thrown by reload on unreadable coordination cache).
+      // Convert exactly that back to a typed failure; genuine defects re-die.
+      Effect.catchAllDefect((defect) =>
+        defect instanceof UniverseUnavailableError ? Effect.fail(defect) : Effect.die(defect),
+      ),
+    );
   }
 
   private async reload(): Promise<LoadedUniverse> {
-    const cached = await Effect.runPromise(this.cache.getJson(UNIVERSE_CACHE_KEY));
-    const decoded =
-      cached === null ? null : Schema.decodeUnknownEither(Schema.Array(SecuritySchema))(cached);
-    if (decoded !== null && decoded._tag === 'Right') {
-      return { bySymbol: indexBySymbol(decoded.right), complete: true, degraded: false };
+    // Coordinated complete builds only: degraded results must never be
+    // cached as canonical, so partial builds escape through
+    // UniverseBuildIncomplete into the LKG merge path below.
+    // Either (not runPromise rejection) carries the outcome across the
+    // Promise boundary: runPromise rejects defects and failures alike as
+    // FiberFailure, which would hide the incomplete-build signal.
+    const coordinated = await Effect.runPromise(
+      Effect.either(
+        this.windows
+          .getOrLoad({
+            key: UNIVERSE_KEY,
+            policy: UNIVERSE_POLICY,
+            decode: decodeCompleteUniverse,
+            load: () =>
+              Effect.gen(this, function* () {
+                const build: UniverseBuild = yield* this.provider.build();
+                if (!build.complete) {
+                  return yield* Effect.fail(new UniverseBuildIncomplete(build));
+                }
+                const lkgWritten = yield* Effect.either(
+                  this.cache.setJson(UNIVERSE_LKG_KEY, build.securities, UNIVERSE_LKG_TTL_SECONDS),
+                );
+                if (Either.isLeft(lkgWritten)) {
+                  // Write-through best effort: the fresh build is served
+                  // regardless; the fetch is already spent.
+                  log.warn('Universe LKG write failed; serving fresh build');
+                }
+                return build.securities;
+              }),
+          })
+          .pipe(
+            Effect.mapError((cause) =>
+              cause instanceof UniverseBuildIncomplete ? cause : new UniverseUnavailableError(),
+            ),
+          ),
+      ),
+    );
+    if (Either.isLeft(coordinated)) {
+      if (coordinated.left instanceof UniverseBuildIncomplete) {
+        return this.degradedFallback(coordinated.left.build);
+      }
+      throw coordinated.left;
     }
-    if (cached !== null) {
-      // Stale schema, not stale data: evict so the next request does not pay
-      // another full upstream rebuild for the same poisoned entry.
-      log.warn('Cached universe failed schema decode; deleting entry and rebuilding from upstream');
-      await Effect.runPromise(this.cache.del(UNIVERSE_CACHE_KEY));
+    return { bySymbol: indexBySymbol(coordinated.right.value), complete: true, degraded: false };
+  }
+
+  private async degradedFallback(build: UniverseBuild): Promise<LoadedUniverse> {
+    let lkg: unknown | null;
+    try {
+      lkg = await Effect.runPromise(this.cache.getJson(UNIVERSE_LKG_KEY));
+    } catch {
+      // Fail closed (ADR 008): without a readable fallback there is nothing
+      // conclusive to serve.
+      throw new UniverseUnavailableError();
     }
-    const build = await Effect.runPromise(this.provider.build());
-    if (build.complete) {
-      const bySymbol = indexBySymbol(build.securities);
-      await Effect.runPromise(this.cache.setJson(UNIVERSE_CACHE_KEY, build.securities, UNIVERSE_TTL_SECONDS));
-      // Only a complete build may refresh last-known-good: a partial build
-      // must never become the canonical cache for the next 24h of 404s.
-      await Effect.runPromise(this.cache.setJson(UNIVERSE_LKG_CACHE_KEY, build.securities, UNIVERSE_LKG_TTL_SECONDS));
-      return { bySymbol, complete: true, degraded: false };
-    }
-    const lkg = await Effect.runPromise(this.cache.getJson(UNIVERSE_LKG_CACHE_KEY));
     const lkgDecoded = lkg === null ? null : Schema.decodeUnknownEither(Schema.Array(SecuritySchema))(lkg);
     if (lkgDecoded !== null && lkgDecoded._tag === 'Right') {
       // Merge with fresh partial winning, but the union is still unverified:
@@ -117,10 +175,16 @@ export class UniverseResolver {
     }
     if (lkg !== null) {
       log.warn('Last-known-good universe failed schema decode; deleting entry');
-      await Effect.runPromise(this.cache.del(UNIVERSE_LKG_CACHE_KEY));
+      try {
+        await Effect.runPromise(this.cache.del(UNIVERSE_LKG_KEY));
+      } catch {
+        log.warn('Universe corrupt-entry eviction failed; rebuilding overwrites it');
+      }
     }
     log.warn(`Universe rebuild partial (${build.failures.join(',')}) with no last-known-good`);
     const bySymbol = indexBySymbol(build.securities);
     return { bySymbol, complete: false, degraded: true };
   }
+
+  // A cached canonical universe is always complete: only complete builds are
 }

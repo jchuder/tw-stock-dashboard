@@ -3,7 +3,7 @@ import { Schema } from 'effect';
 // Feature-local TWSE MIS public market-data endpoint shape
 // (mis.twse.com.tw/stock/api/getStockInfo.jsp — a public JSON endpoint,
 // NOT the TWSE OpenAPI). Decode the Q3 price fields plus the enriched
-// session fields: d (trade date), o/h/l (open/high/low), v (cumulative
+// session fields: d (trade date), t (session time), o/h/l (open/high/low), v (cumulative
 // volume), u/w (limit up/down — the ground truth, never computed from
 // previousClose). Only c/n/ex/z/y stay required; every enriched field is
 // optional so a pre-market `-` placeholder degrades to null, never 500.
@@ -16,6 +16,7 @@ export const TwseMisEntrySchema = Schema.Struct({
   z: Schema.String,
   y: Schema.String,
   d: Schema.optional(Schema.String),
+  t: Schema.optional(Schema.String),
   o: Schema.optional(Schema.String),
   h: Schema.optional(Schema.String),
   l: Schema.optional(Schema.String),
@@ -59,4 +60,26 @@ export function parseMisTradeDate(raw: string | undefined): string | null {
     return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
   }
   return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+// MIS session time arrives as `HH:mm:ss` (e.g. "13:30:00"). Format alone is
+// not enough: range is validated too, so "99:99:99" cannot pass as a
+// completed close. Anything else — missing, `-`, malformed, out-of-range —
+// degrades to null so callers must treat the snapshot as
+// intraday-unverifiable, never as a completed close.
+export function parseMisSessionTime(raw: string | undefined): string | null {
+  if (raw === undefined) {
+    return null;
+  }
+  const match = /^(\d{2}):(\d{2}):(\d{2})$/.exec(raw);
+  if (!match) {
+    return null;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3]);
+  if (hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+  return raw;
 }

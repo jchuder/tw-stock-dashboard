@@ -626,6 +626,18 @@ button {
   padding: 16px 18px 10px;
 }
 
+/* Watchlist header: title stays left, the polling status pins right. */
+.watchlist-card .section-head > div {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.watchlist-card .watchlist-refreshing {
+  margin-left: auto;
+}
+
 .watchlist-list {
   list-style: none;
   padding: 0 12px 10px;
@@ -647,8 +659,11 @@ button {
 }
 
 .watchlist-drag-handle {
-  flex: 0 0 26px;
+  flex: 0 0 16px;
   align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   border: 0;
   background: transparent;
@@ -660,9 +675,7 @@ button {
 .watchlist-drag-handle:active {
   cursor: grabbing;
 }
-
-.watchlist-drag-handle:focus-visible,
-.watchlist-order-button:focus-visible {
+.watchlist-drag-handle:focus-visible {
   outline: 2px solid #b7bdb9;
   outline-offset: -2px;
   border-radius: 4px;
@@ -704,16 +717,24 @@ button {
   min-width: 68px;
 }
 
-.watchlist-item-identity > span {
+.watchlist-item-name {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 400;
+}
+
+.watchlist-item-symbol-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .watchlist-item-market {
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .watchlist-item-values {
@@ -723,6 +744,7 @@ button {
   align-items: flex-end;
   gap: 2px;
   min-width: 0;
+  padding-right: 12px;
 }
 
 .watchlist-price {
@@ -745,32 +767,38 @@ button {
   white-space: nowrap;
 }
 
-.watchlist-item-select[aria-current='true'] {
-  background-color: #e2e8f0;
-  font-weight: 600;
+/* Desktop: watchlist rail stretches to the focus-column bottom. The list
+   keeps a five-row floor and scrolls internally once it fills the rail. */
+@media (min-width: 721px) {
+  .stock-analysis-layout {
+    align-items: stretch;
+  }
+  /* The grid row follows the focus column: the rail must not expand it,
+     otherwise a long list stretches the whole page and never scrolls. */
+  .watchlist-rail {
+    min-height: 0;
+  }
+  .watchlist-card {
+    /* Collapse the intrinsic height contribution so the row tracks focus,
+       then refill the stretched rail once layout resolves it. The floor
+       keeps short-focus states from collapsing below the five-row list. */
+    height: 0;
+    min-height: max(100%, 25rem);
+    display: flex;
+    flex-direction: column;
+  }
+  .watchlist-list {
+    flex: 1 1 auto;
+    min-height: 21rem;
+    max-height: none;
+    overflow-y: auto;
+  }
 }
 
-.watchlist-order-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 2px;
+.watchlist-item:has(> .watchlist-item-select[aria-current='true']) {
+  background-color: #edf2f7;
 }
 
-.watchlist-order-button {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: #ffffff;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.watchlist-order-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.35;
-}
 
 .btn-remove {
   font-size: 0.75rem;
@@ -787,6 +815,32 @@ button {
   color: #ef4444;
   border-color: #fca5a5;
   background-color: #fef2f2;
+}
+
+/* Watchlist icon remove: red trash, compact so long names fit the rail. */
+.watchlist-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  cursor: pointer;
+  color: var(--color-up);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  transition: all 0.15s ease;
+}
+.watchlist-remove:hover {
+  color: #b91c1c;
+  border-color: #fca5a5;
+  background-color: #fef2f2;
+}
+.watchlist-remove:focus-visible {
+  outline: 2px solid #b7bdb9;
+  outline-offset: -2px;
 }
 
 /* Analysis Area */
