@@ -110,6 +110,9 @@ export function StockHistoryFocus({
   const history = useQuery({
     queryKey: ['stock-history', symbol, range],
     queryFn: () => fetchStockHistory(symbol, range),
+    // No interval polling here, but a staleTime keeps window-focus from
+    // refetching a just-loaded chart: 30s intraday, 5min daily.
+    staleTime: isIntradayRange(range) ? 30_000 : 300_000,
     retry: false,
   });
   const displayLabels = history.data
@@ -245,6 +248,7 @@ export function StockHistoryTable({ symbol, range }: { symbol: string; range: Hi
   const table = useQuery({
     queryKey: ['stock-history', symbol, tableRange],
     queryFn: () => fetchStockHistory(symbol, tableRange),
+    staleTime: 300_000,
     retry: false,
   });
 
