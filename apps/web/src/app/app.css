@@ -773,8 +773,17 @@ button {
   .stock-analysis-layout {
     align-items: stretch;
   }
+  /* The grid row follows the focus column: the rail must not expand it,
+     otherwise a long list stretches the whole page and never scrolls. */
+  .watchlist-rail {
+    min-height: 0;
+  }
   .watchlist-card {
-    height: 100%;
+    /* Collapse the intrinsic height contribution so the row tracks focus,
+       then refill the stretched rail once layout resolves it. The floor
+       keeps short-focus states from collapsing below the five-row list. */
+    height: 0;
+    min-height: max(100%, 25rem);
     display: flex;
     flex-direction: column;
   }
