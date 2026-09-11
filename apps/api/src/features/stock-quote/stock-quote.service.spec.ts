@@ -16,24 +16,12 @@ import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 
 import {
-  acquireProjectRedisMutex,
   createTestCacheService,
   flushProjectRedisKeys,
 } from '../../libs/cache/cache-test.helper.js';
 
-let releaseProjectRedis: (() => Promise<void>) | null = null;
-
 beforeEach(async () => {
-  releaseProjectRedis = await acquireProjectRedisMutex();
   await flushProjectRedisKeys();
-});
-
-afterEach(async () => {
-  const release = releaseProjectRedis;
-  releaseProjectRedis = null;
-  if (release) {
-    await release();
-  }
 });
 
 const MIS_BODY = { msgArray: [{ c: '2330', n: '台積電', ex: 'tse', z: '568', y: '566' }] };
@@ -567,7 +555,6 @@ describe('StockQuoteService ESB routing', () => {
     expect(callsTo(fetchMock, 'mis.twse.com.tw')).toBe(0);
   });
 });
-
 
 describe('StockQuoteService Public Data closed-session freshness', () => {
   afterEach(() => {

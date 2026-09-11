@@ -17,22 +17,12 @@ import { RedisConnectionError } from '../../libs/cache/redis.error.js';
 import { WindowCoordinationTimeoutError } from '../../libs/cache/window-cache.error.js';
 import { Effect } from 'effect';
 
-import { acquireProjectRedisMutex, flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
-
-let releaseProjectRedis: (() => Promise<void>) | null = null;
+import { flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
 
 beforeEach(async () => {
-  releaseProjectRedis = await acquireProjectRedisMutex();
   await flushProjectRedisKeys();
 });
 
-afterEach(async () => {
-  const release = releaseProjectRedis;
-  releaseProjectRedis = null;
-  if (release) {
-    await release();
-  }
-});
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
   return async (input: unknown) => universeFixtureResponse(String(input)) ?? handler(input);
 }
@@ -691,6 +681,9 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
   });
 
   it('maps official quote cache errors to HTTP 503', async () => {
+    // Deterministic upstreams: the universe rebuild after the per-test Redis
+    // flush must not touch the real network (MIS stays a live candidate).
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
     const officialProvider = app.get(OfficialDailyQuoteProvider);
     vi.spyOn(officialProvider, 'getQuote').mockReturnValue(
       Effect.fail(new OfficialDailyQuoteError({ market: 'TWSE', stage: 'cache' })),
@@ -705,6 +698,8 @@ it('echoes a valid incoming X-Request-ID on the response', async () => {
   });
 
   it('maps ESB quote cache errors (TpexEsbCacheError) to HTTP 503', async () => {
+    // Same as above: universe rebuild must resolve from fixture, never network.
+    mockUpstreams(jsonResponse(FUGLE_FIXTURE), jsonResponse(MIS_FIXTURE));
     const esbProvider = app.get(TpexEsbQuoteProvider);
     vi.spyOn(esbProvider, 'getQuote').mockReturnValue(
       Effect.fail(new TpexEsbCacheError()),

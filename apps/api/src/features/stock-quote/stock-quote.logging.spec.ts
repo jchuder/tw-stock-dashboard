@@ -10,21 +10,10 @@ import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { UniverseModule } from '../../libs/securities/universe.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
 
-import { acquireProjectRedisMutex, flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
-
-let releaseProjectRedis: (() => Promise<void>) | null = null;
+import { flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
 
 beforeEach(async () => {
-  releaseProjectRedis = await acquireProjectRedisMutex();
   await flushProjectRedisKeys();
-});
-
-afterEach(async () => {
-  const release = releaseProjectRedis;
-  releaseProjectRedis = null;
-  if (release) {
-    await release();
-  }
 });
 
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {

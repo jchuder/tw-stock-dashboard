@@ -11,21 +11,10 @@ import { StockHistoryCacheError } from './fugle-history.error.js';
 import { OfficialDailyHistoryProvider } from './official-daily-history.provider.js';
 import { Effect } from 'effect';
 
-import { acquireProjectRedisMutex, flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
-
-let releaseProjectRedis: (() => Promise<void>) | null = null;
+import { flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
 
 beforeEach(async () => {
-  releaseProjectRedis = await acquireProjectRedisMutex();
   await flushProjectRedisKeys();
-});
-
-afterEach(async () => {
-  const release = releaseProjectRedis;
-  releaseProjectRedis = null;
-  if (release) {
-    await release();
-  }
 });
 
 function serveUniverseFirst(handler: (input: unknown) => Promise<Response>): (input: unknown) => Promise<Response> {
@@ -610,6 +599,14 @@ describe('GET /api/v1/stocks/:symbol/history', () => {
   });
 
   it('maps history cache errors (StockHistoryCacheError) to HTTP 503', async () => {
+    // Deterministic universe: the rebuild after the per-test Redis flush
+    // must resolve from fixture, never the real network.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        serveUniverseFirst(async () => new Response('Not Found', { status: 404 })),
+      ),
+    );
     const officialHistoryProvider = app.get(OfficialDailyHistoryProvider);
     vi.spyOn(officialHistoryProvider, 'getDailyHistory').mockReturnValue(
       Effect.fail(new StockHistoryCacheError()),

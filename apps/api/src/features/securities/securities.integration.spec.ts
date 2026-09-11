@@ -7,21 +7,10 @@ import { LoggerModule } from '../../libs/observability/logger.module.js';
 import { universeFixtureResponse } from '../../libs/securities/universe.fixtures.js';
 import { SecuritiesModule } from './securities.module.js';
 
-import { acquireProjectRedisMutex, flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
-
-let releaseProjectRedis: (() => Promise<void>) | null = null;
+import { flushProjectRedisKeys } from '../../libs/cache/cache-test.helper.js';
 
 beforeEach(async () => {
-  releaseProjectRedis = await acquireProjectRedisMutex();
   await flushProjectRedisKeys();
-});
-
-afterEach(async () => {
-  const release = releaseProjectRedis;
-  releaseProjectRedis = null;
-  if (release) {
-    await release();
-  }
 });
 
 function stubUniverse(): void {

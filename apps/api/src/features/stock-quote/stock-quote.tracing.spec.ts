@@ -16,25 +16,14 @@ import { TpexEsbQuoteProvider } from './tpex-esb-quote.provider.js';
 import { TwseMisQuoteProvider } from './twse-mis-quote.provider.js';
 
 import {
-  acquireProjectRedisMutex,
   createTestCacheService,
   flushProjectRedisKeys,
 } from '../../libs/cache/cache-test.helper.js';
 
-let releaseProjectRedis: (() => Promise<void>) | null = null;
-
 beforeEach(async () => {
-  releaseProjectRedis = await acquireProjectRedisMutex();
   await flushProjectRedisKeys();
 });
 
-afterEach(async () => {
-  const release = releaseProjectRedis;
-  releaseProjectRedis = null;
-  if (release) {
-    await release();
-  }
-});
 vi.mock('../../libs/observability/tracing.js', () => ({
   addSpanEvent: vi.fn(),
   setSpanAttributes: vi.fn(),

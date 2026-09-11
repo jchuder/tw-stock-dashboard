@@ -1,8 +1,7 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Effect, Either } from 'effect';
 import type { StockQuoteResponse } from '@tw-stock-dashboard/contracts';
 import {
-  acquireProjectRedisMutex,
   createTestCacheService,
   flushProjectRedisKeys,
 } from '../../libs/cache/cache-test.helper.js';
@@ -40,7 +39,6 @@ const MOCK_QUOTE: StockQuoteResponse = {
 };
 
 describe('StockQuoteCache', () => {
-  let releaseProjectRedis: (() => Promise<void>) | null = null;
   let cache: CacheService;
   let windows: WindowCacheService;
   let quoteCache: StockQuoteCache;
@@ -52,16 +50,7 @@ describe('StockQuoteCache', () => {
   });
 
   beforeEach(async () => {
-    releaseProjectRedis = await acquireProjectRedisMutex();
     await flushProjectRedisKeys();
-  });
-
-  afterEach(async () => {
-    const release = releaseProjectRedis;
-    releaseProjectRedis = null;
-    if (release) {
-      await release();
-    }
   });
 
   it('loads on miss and writes to Redis under quoteKey for enhanced mode', async () => {

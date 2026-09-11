@@ -1,7 +1,6 @@
 import { Duration, Effect, Either, Fiber, TestClock, TestContext } from 'effect';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
-  acquireProjectRedisMutex,
   createTestCacheService,
   flushProjectRedisKeys,
 } from './cache-test.helper.js';
@@ -22,7 +21,6 @@ const FAST: WindowCachePolicy = {
 
 const decodeNumber = (value: unknown): number | null => (typeof value === 'number' ? value : null);
 
-let releaseProjectRedis: (() => Promise<void>) | null = null;
 let cache: CacheService;
 let service: WindowCacheService;
 let raw: RedisService;
@@ -39,16 +37,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  releaseProjectRedis = await acquireProjectRedisMutex();
   await flushProjectRedisKeys();
-});
-
-afterEach(async () => {
-  const release = releaseProjectRedis;
-  releaseProjectRedis = null;
-  if (release) {
-    await release();
-  }
 });
 
 function run<T, E>(effect: Effect.Effect<T, E>): Promise<Either.Either<T, E>> {
