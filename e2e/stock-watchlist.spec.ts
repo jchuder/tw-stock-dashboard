@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 const ENRICHED_QUOTE = {
   tradeDate: '2026-09-04',
@@ -84,6 +85,67 @@ function historyRoute(symbol: string) {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles(symbol, range)) });
   };
 }
+// ---- Hermetic watchlist API stubs ----
+// Watchlist names/markets come from /api/v1/securities and per-item state
+// from the /api/v1/stocks/quotes batch. Neither may touch the real Universe
+// or upstream in E2E: a slow security response renders every name as '—'
+// and breaks exact accessible-name assertions.
+const KNOWN_SECURITY_META: Record<string, { name: string; market: 'TWSE' | 'TPEX' | 'ESB'; type: 'stock' | 'etf' }> = {
+  '2330': { name: '台積電', market: 'TWSE', type: 'stock' },
+  '2454': { name: '聯發科', market: 'TWSE', type: 'stock' },
+};
+
+function securityFor(symbol: string) {
+  const known = KNOWN_SECURITY_META[symbol];
+  return {
+    symbol,
+    name: known?.name ?? `Test ${symbol}`,
+    market: known?.market ?? 'TWSE',
+    type: known?.type ?? 'stock',
+  };
+}
+
+function batchQuoteFor(symbol: string) {
+  const security = securityFor(symbol);
+  return {
+    symbol,
+    quote: { ...QUOTE_2330, symbol, name: security.name, market: security.market },
+    error: null,
+  };
+}
+
+function symbolsParam(url: string): string[] {
+  return (new URL(url).searchParams.get('symbols') ?? '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+async function installWatchlistApiStubs(page: Page): Promise<void> {
+  await page.route('**/api/v1/securities*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(symbolsParam(route.request().url()).map(securityFor)),
+    });
+  });
+  await page.route('**/api/v1/stocks/quotes*', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: symbolsParam(route.request().url()).map((symbol) => batchQuoteFor(symbol)),
+      }),
+    });
+  });
+}
+
+test.beforeEach(async ({ page }) => {
+  await installWatchlistApiStubs(page);
+});
+
 
 test('A & B: Seeded watchlist on first run, add new stock to watchlist, and duplicate protection', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
@@ -244,16 +306,19 @@ test('E: Remove active stock keeps quote and chart displayed', async ({ page }) 
   await expect(page.getByTestId('stock-quote-price')).toHaveText('568');
 });
 
-test('F: >4 items list is scrollable and all items reachable', async ({ page }) => {
+test('F: Long watchlist renders all items and both ends remain reachable', async ({ page }) => {
+  // Deterministic single-quote fallback for the boot autofocus on the first item.
+  await page.route('**/api/v1/stocks/*/quote', (route) => {
+    expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+  });
+  // Twenty deterministic rows exercise the filled-rail layout. NOTE: the
+  // desktop rail stretches with content (flex, max-height none), so internal
+  // scrollHeight overflow is not the product contract here — reachability is.
   const items = [
-    '2330',
-    '2454',
-    '2308',
-    '2317',
-    '2382',
-    '3008',
-    '2881',
-    '2002',
+    '2330', '2454', '2308', '2317', '2382', '3008', '2881', '2002',
+    '1101', '1216', '1301', '1303', '1326', '1402',
+    '1414', '1434', '1440', '1451', '1452', '1455',
   ];
   await page.addInitScript((data) => {
     localStorage.setItem('tw-stock-dashboard.watchlist.v2', JSON.stringify(data));
@@ -263,17 +328,20 @@ test('F: >4 items list is scrollable and all items reachable', async ({ page }) 
 
   const container = page.getByTestId('watchlist-container');
   await expect(container).toBeVisible();
+  await expect(container).toHaveCSS('overflow-y', 'auto');
 
-  // Verify container is scrollable
-  const isScrollable = await container.evaluate(
-    (el) => el.scrollHeight > el.clientHeight,
-  );
-  expect(isScrollable).toBe(true);
+  // Every row renders.
+  for (const symbol of items) {
+    await expect(page.getByTestId(`watchlist-item-${symbol}`)).toHaveCount(1);
+  }
 
-  // Last item exists and can be scrolled into view
-  const lastItem = page.getByTestId('watchlist-item-2002');
+  // Both ends stay reachable through the rail.
+  const lastItem = page.getByTestId(`watchlist-item-${items[items.length - 1]}`);
   await lastItem.scrollIntoViewIfNeeded();
   await expect(lastItem).toBeVisible();
+  const firstItem = page.getByTestId(`watchlist-item-${items[0]}`);
+  await firstItem.scrollIntoViewIfNeeded();
+  await expect(firstItem).toBeVisible();
 });
 
 test('G: Invalid symbol cannot be added to watchlist', async ({ page }) => {
