@@ -140,18 +140,19 @@ test('MA legend toggles aria-pressed without refetching and persists across rang
   await expect(page.getByRole('button', { name: /MA10/ })).toHaveAttribute('aria-pressed', 'true');
   expect(historyRanges.length).toBe(initialRequests);
 
-  // Switch to 1M range
+  // Switch to 1M range: the chart reuses the 1m response the daily table
+  // already fetched, so no new request fires.
   await page.getByRole('button', { name: '1M' }).click();
   await expect(page.getByRole('button', { name: '1M' })).toHaveAttribute('aria-pressed', 'true');
-  expect(historyRanges.length).toBe(initialRequests + 1);
-  expect(historyRanges[historyRanges.length - 1]).toBe('1m');
+  expect(historyRanges.length).toBe(initialRequests);
+  expect(historyRanges).toContain('1m');
 
   // Legend state preserved
   await expect(page.getByRole('button', { name: /MA5/ })).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByRole('button', { name: /MA10/ })).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('all seven ranges refetch with the right range param', async ({ page }) => {
+test('all seven ranges request the right range param and share the daily cache', async ({ page }) => {
   const historyRanges = await setupAnalysis(page);
 
   await page.goto('/');
@@ -168,8 +169,12 @@ test('all seven ranges refetch with the right range param', async ({ page }) => 
   ] as const) {
     await page.getByRole('button', { name: label, exact: true }).click();
     await expect(page.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true');
-    expect(historyRanges[historyRanges.length - 1]).toBe(value);
+    expect(historyRanges).toContain(value);
   }
+  // Each distinct range is fetched exactly once: the 1M chart reuses the 1m
+  // response the daily table already fetched instead of refetching it.
+  expect(historyRanges.filter((range) => range !== '1m')).toEqual(['1d', '3d', '5d', '3m', '6m', '1y']);
+  expect(historyRanges.filter((range) => range === '1m')).toHaveLength(1);
   await expect(page.getByText('日 K · 成交量（股）')).toBeVisible();
 });
 
