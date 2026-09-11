@@ -13,6 +13,10 @@ on:
         description: Commit before the release version changes
         required: true
         type: string
+      target_sha:
+        description: Release commit that contains the version changes
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -38,38 +42,51 @@ jobs:
         env:
           BEFORE_SHA: ${{ github.event.before }}
           RECOVERY_BASE_SHA: ${{ inputs.base_sha }}
+          RECOVERY_TARGET_SHA: ${{ inputs.target_sha }}
         shell: bash
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             base_sha="$RECOVERY_BASE_SHA"
+            target_sha="$RECOVERY_TARGET_SHA"
           else
             base_sha="$BEFORE_SHA"
+            target_sha="$GITHUB_SHA"
           fi
 
-          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
-            echo "A valid base SHA is required to determine package version changes." >&2
+          for sha in "$base_sha" "$target_sha"; do
+            if [ -z "$sha" ] || [ "$sha" = "0000000000000000000000000000000000000000" ]; then
+              echo "Valid base and target SHAs are required to determine package version changes." >&2
+              exit 1
+            fi
+
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "Commit is not available in repository history: $sha" >&2
+              exit 1
+            fi
+          done
+
+          if ! git merge-base --is-ancestor "$base_sha" "$target_sha"; then
+            echo "Recovery base is not an ancestor of target: $base_sha -> $target_sha" >&2
             exit 1
           fi
 
-          if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
-            echo "Base SHA is not available in repository history: $base_sha" >&2
-            exit 1
-          fi
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
 
-          node --input-type=module - "$base_sha" <<'NODE' > /tmp/version-tags.txt
+          node --input-type=module - "$base_sha" "$target_sha" <<'NODE' > /tmp/version-tags.txt
           import { execFileSync } from 'node:child_process';
-          import { readFileSync } from 'node:fs';
 
           const base = process.argv[2];
-          const changed = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' })
+          const target = process.argv[3];
+          const changed = execFileSync('git', ['diff', '--name-only', base, target], { encoding: 'utf8' })
             .trim()
             .split('\n')
             .filter((path) => /^(apps|packages)\/[^/]+\/package\.json$/.test(path));
 
           for (const path of changed) {
-            const current = JSON.parse(readFileSync(path, 'utf8'));
+            let current;
             let previous;
             try {
+              current = JSON.parse(execFileSync('git', ['show', `${target}:${path}`], { encoding: 'utf8' }));
               previous = JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { encoding: 'utf8' }));
             } catch {
               continue;
@@ -99,12 +116,14 @@ jobs:
 
       - name: Create changed package tags
         if: steps.versions.outputs.found == 'true'
+        env:
+          RELEASE_TARGET_SHA: ${{ steps.versions.outputs.target_sha }}
         shell: bash
         run: |
           while IFS= read -r tag; do
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
               tagged_commit="$(git rev-list -n 1 "$tag")"
-              if [ "$tagged_commit" != "$GITHUB_SHA" ]; then
+              if [ "$tagged_commit" != "$RELEASE_TARGET_SHA" ]; then
                 echo "Tag already exists on a different commit: $tag -> $tagged_commit" >&2
                 exit 1
               fi
@@ -112,7 +131,7 @@ jobs:
               continue
             fi
 
-            git tag "$tag" -m "$tag" "$GITHUB_SHA"
+            git tag "$tag" -m "$tag" "$RELEASE_TARGET_SHA"
           done < /tmp/version-tags.txt
 
       - name: Push changed package tags
