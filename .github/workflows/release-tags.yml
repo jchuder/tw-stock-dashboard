@@ -8,6 +8,15 @@ on:
       - 'apps/**/package.json'
       - 'packages/**/package.json'
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Commit before the release version changes
+        required: true
+        type: string
+      target_sha:
+        description: Release commit that contains the version changes
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -32,27 +41,52 @@ jobs:
         id: versions
         env:
           BEFORE_SHA: ${{ github.event.before }}
+          RECOVERY_BASE_SHA: ${{ inputs.base_sha }}
+          RECOVERY_TARGET_SHA: ${{ inputs.target_sha }}
         shell: bash
         run: |
-          base_sha="$BEFORE_SHA"
-          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
-            base_sha="HEAD^"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            base_sha="$RECOVERY_BASE_SHA"
+            target_sha="$RECOVERY_TARGET_SHA"
+          else
+            base_sha="$BEFORE_SHA"
+            target_sha="$GITHUB_SHA"
           fi
 
-          node --input-type=module - "$base_sha" <<'NODE' > /tmp/version-tags.txt
+          for sha in "$base_sha" "$target_sha"; do
+            if [ -z "$sha" ] || [ "$sha" = "0000000000000000000000000000000000000000" ]; then
+              echo "Valid base and target SHAs are required to determine package version changes." >&2
+              exit 1
+            fi
+
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "Commit is not available in repository history: $sha" >&2
+              exit 1
+            fi
+          done
+
+          if ! git merge-base --is-ancestor "$base_sha" "$target_sha"; then
+            echo "Recovery base is not an ancestor of target: $base_sha -> $target_sha" >&2
+            exit 1
+          fi
+
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+
+          node --input-type=module - "$base_sha" "$target_sha" <<'NODE' > /tmp/version-tags.txt
           import { execFileSync } from 'node:child_process';
-          import { readFileSync } from 'node:fs';
 
           const base = process.argv[2];
-          const changed = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' })
+          const target = process.argv[3];
+          const changed = execFileSync('git', ['diff', '--name-only', base, target], { encoding: 'utf8' })
             .trim()
             .split('\n')
             .filter((path) => /^(apps|packages)\/[^/]+\/package\.json$/.test(path));
 
           for (const path of changed) {
-            const current = JSON.parse(readFileSync(path, 'utf8'));
+            let current;
             let previous;
             try {
+              current = JSON.parse(execFileSync('git', ['show', `${target}:${path}`], { encoding: 'utf8' }));
               previous = JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { encoding: 'utf8' }));
             } catch {
               continue;
@@ -73,19 +107,37 @@ jobs:
             echo "No workspace package version changed."
           fi
 
-      - name: Create Changesets tags
+      - name: Configure Git tag identity
         if: steps.versions.outputs.found == 'true'
         shell: bash
-        run: pnpm release:tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create changed package tags
+        if: steps.versions.outputs.found == 'true'
+        env:
+          RELEASE_TARGET_SHA: ${{ steps.versions.outputs.target_sha }}
+        shell: bash
+        run: |
+          while IFS= read -r tag; do
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              tagged_commit="$(git rev-list -n 1 "$tag")"
+              if [ "$tagged_commit" != "$RELEASE_TARGET_SHA" ]; then
+                echo "Tag already exists on a different commit: $tag -> $tagged_commit" >&2
+                exit 1
+              fi
+              echo "Tag already exists on this release commit: $tag"
+              continue
+            fi
+
+            git tag "$tag" -m "$tag" "$RELEASE_TARGET_SHA"
+          done < /tmp/version-tags.txt
 
       - name: Push changed package tags
         if: steps.versions.outputs.found == 'true'
         shell: bash
         run: |
           while IFS= read -r tag; do
-            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-              echo "Expected Changesets tag was not created: $tag" >&2
-              exit 1
-            fi
             git push origin "refs/tags/$tag"
           done < /tmp/version-tags.txt
