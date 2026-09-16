@@ -8,32 +8,13 @@ import {
   TWSE_LISTED_URL,
   UniverseProvider,
 } from './universe.provider.js';
-
-const TWSE_L = [
-  { '公司代號': '2330', '公司簡稱': '台積電' },
-  { '公司代號': '2317', '公司簡稱': '鴻海' },
-];
-
-const TWSE_FUND = [{ '基金代號': '00981A', '基金簡稱': '主動統一台股增長' }];
-
-const TPEX_O = [{ SecuritiesCompanyCode: '6488', CompanyAbbreviation: '環球晶' }];
-
-const TPEX_R = [{ SecuritiesCompanyCode: '7883', CompanyAbbreviation: '饗賓' }];
-
-// Production Big5 sample: ETF section header plus the 00411A and 006201 rows,
-// captured 2026-09-07 from the live ISIN page. The provider decodes Big5, so
-// the fixture must be real Big5 bytes — a UTF-8 string would garble the CJK
-// market marker and exercise nothing.
-const ISIN_ETF_BIG5 = Buffer.concat([
-  Buffer.from(
-    'Z2NvbG9yPSNGQUZBRDI+PC90ZD48L3RyPjx0cj48dGQgYmdjb2xvcj0jRkFGQUQyIGNvbHNwYW49NyA+PEI+IEVURiA8Qj4gPC90ZD48L3RyPjx0cj48dGQgYmdjb2xvcj0jRkFGQUQyPjAwNDExQaFApUSwyrLOpECrZap1rOyn3jwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj5UVzAwMDAwNDExQTA8L3RkPjx0ZCBiZ2NvbG9yPSNGQUZBRDI+MjAyNi8wOC8yNjwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj6kV8JkPC90ZD48dGQgYmdjb2xvcj0jRkFGQUQyPjwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj5DRU9JRVU8L3RkPjx0ZCBiZ2NvbG9yPSNGQUZBRDI+PC90ZD48L3RyPg==',
-    'base64',
-  ),
-  Buffer.from(
-    'PHRyPjx0ZCBiZ2NvbG9yPSNGQUZBRDI+MDA2MjAxoUCkuKRqtEnCZDUwPC90ZD48dGQgYmdjb2xvcj0jRkFGQUQyPlRXMDAwMDA2MjAxNzwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj4yMDExLzAxLzI3PC90ZD48dGQgYmdjb2xvcj0jRkFGQUQyPqRXwmQ8L3RkPjx0ZCBiZ2NvbG9yPSNGQUZBRDI+PC90ZD48dGQgYmdjb2xvcj0jRkFGQUQyPkNFT0dFVTwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj48L3RkPjwvdHI+',
-    'base64',
-  ),
-]);
+import {
+  ISIN_ETF_BIG5,
+  TPEX_O,
+  TPEX_R,
+  TWSE_FUND,
+  TWSE_L,
+} from './universe.fixtures.js';
 
 function stubUniverse(overrides: Record<string, Response> = {}): void {
   vi.stubGlobal(
