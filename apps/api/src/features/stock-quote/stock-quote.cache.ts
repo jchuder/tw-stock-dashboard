@@ -48,8 +48,4 @@ export class StockQuoteCache {
       return coordinated.value;
     });
   }
-
-  clear(): void {
-    // Kept for test reset compatibility across cases.
-  }
 }
