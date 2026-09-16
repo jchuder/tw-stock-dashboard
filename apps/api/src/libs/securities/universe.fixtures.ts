@@ -4,18 +4,18 @@
 // The ISIN sample is real Big5 bytes from the live page: the provider decodes
 // Big5, so a UTF-8 string fixture would garble CJK and exercise nothing.
 
-const TWSE_L = [
+export const TWSE_L = [
   { '公司代號': '2330', '公司簡稱': '台積電' },
   { '公司代號': '2317', '公司簡稱': '鴻海' },
 ];
 
-const TWSE_FUND = [{ '基金代號': '00981A', '基金簡稱': '主動統一台股增長' }];
+export const TWSE_FUND = [{ '基金代號': '00981A', '基金簡稱': '主動統一台股增長' }];
 
-const TPEX_O = [{ SecuritiesCompanyCode: '6488', CompanyAbbreviation: '環球晶' }];
+export const TPEX_O = [{ SecuritiesCompanyCode: '6488', CompanyAbbreviation: '環球晶' }];
 
-const TPEX_R = [{ SecuritiesCompanyCode: '7883', CompanyAbbreviation: '饗賓' }];
+export const TPEX_R = [{ SecuritiesCompanyCode: '7883', CompanyAbbreviation: '饗賓' }];
 
-const ISIN_ETF_BIG5 = Buffer.concat([
+export const ISIN_ETF_BIG5 = Buffer.concat([
   Buffer.from(
     'Z2NvbG9yPSNGQUZBRDI+PC90ZD48L3RyPjx0cj48dGQgYmdjb2xvcj0jRkFGQUQyIGNvbHNwYW49NyA+PEI+IEVURiA8Qj4gPC90ZD48L3RyPjx0cj48dGQgYmdjb2xvcj0jRkFGQUQyPjAwNDExQaFApUSwyrLOpECrZap1rOyn3jwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj5UVzAwMDAwNDExQTA8L3RkPjx0ZCBiZ2NvbG9yPSNGQUZBRDI+MjAyNi8wOC8yNjwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj6kV8JkPC90ZD48dGQgYmdjb2xvcj0jRkFGQUQyPjwvdGQ+PHRkIGJnY29sb3I9I0ZBRkFEMj5DRU9JRVU8L3RkPjx0ZCBiZ2NvbG9yPSNGQUZBRDI+PC90ZD48L3RyPg==',
     'base64',
