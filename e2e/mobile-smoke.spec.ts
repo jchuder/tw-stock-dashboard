@@ -1,33 +1,5 @@
 import { expect, test } from '@playwright/test';
-
-const MOCK_MARKET_OVERVIEW = {
-  taiex: {
-    value: 46551.13,
-    change: 693.47,
-    changePercent: 1.51,
-    state: 'closed',
-    tradeDate: '2026-09-04',
-    asOf: null,
-    source: 'twse',
-  },
-  otc: {
-    value: 402.48,
-    change: 7.23,
-    changePercent: 1.83,
-    state: 'closed',
-    tradeDate: '2026-09-04',
-    asOf: null,
-    source: 'tpex',
-  },
-  institutional: {
-    asOf: '2026-09-04',
-    market: 'TWSE' as const,
-    foreignNetAmount: 56212953803,
-    investmentTrustNetAmount: -910866463,
-    dealerNetAmount: 6370061244,
-    totalNetAmount: 61672148584,
-  },
-};
+import { MOCK_MARKET_OVERVIEW } from './fixtures.js';
 
 const QUOTE_2330 = {
   symbol: '2330',
@@ -79,15 +51,15 @@ test.use({ viewport: { width: 390, height: 844 } });
 test('mobile viewport smoke: usable search, market overview, watchlist, and chart', async ({ page }) => {
   await page.route('**/api/v1/market/overview', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_MARKET_OVERVIEW) });
+    return route.fulfill({ status: 200, json: MOCK_MARKET_OVERVIEW });
   });
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+    return route.fulfill({ status: 200, json: QUOTE_2330 });
   });
   await page.route('**/api/v1/stocks/2330/history*', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CANDLES_2330) });
+    return route.fulfill({ status: 200, json: CANDLES_2330 });
   });
 
   await page.addInitScript(() => {

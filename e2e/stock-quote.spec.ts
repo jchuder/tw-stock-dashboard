@@ -86,8 +86,7 @@ test('stock quote happy path', async ({ page }) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(FUGLE_BODY),
+      json: FUGLE_BODY,
     });
   });
 
@@ -115,8 +114,7 @@ test('falling quote states explicit previous-day wording in green', async ({ pag
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ...FUGLE_BODY, price: 560, change: -6, changePercent: -1.06 }),
+      json: { ...FUGLE_BODY, price: 560, change: -6, changePercent: -1.06 },
     });
   });
 
@@ -135,8 +133,7 @@ test('flat quote states 持平 wording', async ({ page }) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ...FUGLE_BODY, price: 566, change: 0, changePercent: 0 }),
+      json: { ...FUGLE_BODY, price: 566, change: 0, changePercent: 0 },
     });
   });
 
@@ -159,8 +156,7 @@ test('source fallback and recovery toasts', async ({ page }) => {
     calls += 1;
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(body),
+      json: body,
     });
   });
 
@@ -202,15 +198,13 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
     if (callCount === 1) {
       return route.fulfill({
         status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(FUGLE_BODY),
+        json: FUGLE_BODY,
       });
     }
     await secondQuotePromise;
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+      json: {
         ...MIS_BODY,
         source: {
           provider: 'twse-mis',
@@ -220,7 +214,7 @@ test('same-symbol refresh clears header provenance until new quote resolves', as
           asOf: '2026-09-04T05:35:00.000Z',
           cacheHit: false,
         },
-      }),
+      },
     });
   });
 
@@ -250,16 +244,14 @@ test('public data mode shows persistent banner, disables 5m candles, and updates
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(OFFICIAL_PUBLIC_TWSE_BODY),
+      json: OFFICIAL_PUBLIC_TWSE_BODY,
     });
   });
 
   await page.route('**/api/v1/stocks/2330/history?range=1m', (route) => {
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+      json: {
         symbol: '2330',
         market: 'TWSE',
         range: '1m',
@@ -286,7 +278,7 @@ test('public data mode shows persistent banner, disables 5m candles, and updates
             ma60: null,
           },
         ],
-      }),
+      },
     });
   });
 

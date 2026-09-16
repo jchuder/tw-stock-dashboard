@@ -1,33 +1,5 @@
 import { expect, test } from '@playwright/test';
-
-const MOCK_MARKET_OVERVIEW = {
-  taiex: {
-    value: 46551.13,
-    change: 693.47,
-    changePercent: 1.51,
-    state: 'closed',
-    tradeDate: '2026-09-04',
-    asOf: null,
-    source: 'twse',
-  },
-  otc: {
-    value: 402.48,
-    change: 7.23,
-    changePercent: 1.83,
-    state: 'closed',
-    tradeDate: '2026-09-04',
-    asOf: null,
-    source: 'tpex',
-  },
-  institutional: {
-    asOf: '2026-09-04',
-    market: 'TWSE',
-    foreignNetAmount: 56212953803,
-    investmentTrustNetAmount: -910866463,
-    dealerNetAmount: 6370061244,
-    totalNetAmount: 61672148584,
-  },
-};
+import { MOCK_MARKET_OVERVIEW } from './fixtures.js';
 
 const MOCK_INTRADAY_MARKET_OVERVIEW = {
   taiex: {
@@ -92,8 +64,7 @@ test('homepage loads TAIEX, OTC, and 上市三大法人 with positive/negative f
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(MOCK_MARKET_OVERVIEW),
+      json: MOCK_MARKET_OVERVIEW,
     });
   });
 
@@ -131,8 +102,7 @@ test('market overview 500 error does NOT break stock search', async ({ page }) =
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 500,
-      contentType: 'application/json',
-      body: JSON.stringify({ statusCode: 500, message: 'Failed to fetch market overview' }),
+      json: { statusCode: 500, message: 'Failed to fetch market overview' },
     });
   });
 
@@ -140,8 +110,7 @@ test('market overview 500 error does NOT break stock search', async ({ page }) =
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(QUOTE_BODY),
+      json: QUOTE_BODY,
     });
   });
 
@@ -164,8 +133,7 @@ test('market overview displays intraday time correctly when in intraday state', 
   await page.route('**/api/v1/market/overview', (route) => {
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(MOCK_INTRADAY_MARKET_OVERVIEW),
+      json: MOCK_INTRADAY_MARKET_OVERVIEW,
     });
   });
 

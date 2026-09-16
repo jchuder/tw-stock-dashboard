@@ -82,7 +82,7 @@ function historyRoute(symbol: string) {
   return async (route: import('@playwright/test').Route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     const range = new URL(route.request().url()).searchParams.get('range') ?? '1d';
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles(symbol, range)) });
+    return route.fulfill({ status: 200, json: makeCandles(symbol, range) });
   };
 }
 // ---- Hermetic watchlist API stubs ----
@@ -126,18 +126,16 @@ async function installWatchlistApiStubs(page: Page): Promise<void> {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(symbolsParam(route.request().url()).map(securityFor)),
+      json: symbolsParam(route.request().url()).map(securityFor),
     });
   });
   await page.route('**/api/v1/stocks/quotes*', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+      json: {
         items: symbolsParam(route.request().url()).map((symbol) => batchQuoteFor(symbol)),
-      }),
+      },
     });
   });
 }
@@ -150,12 +148,12 @@ test.beforeEach(async ({ page }) => {
 test('A & B: Seeded watchlist on first run, add new stock to watchlist, and duplicate protection', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+    return route.fulfill({ status: 200, json: QUOTE_2330 });
   });
   await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
   await page.route('**/api/v1/stocks/2454/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2454) });
+    return route.fulfill({ status: 200, json: QUOTE_2454 });
   });
   await page.route('**/api/v1/stocks/2454/history*', historyRoute('2454'));
 
@@ -213,12 +211,12 @@ test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
   await page.route('**/api/v1/stocks/*/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     quoteCount++;
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+    return route.fulfill({ status: 200, json: QUOTE_2330 });
   });
   await page.route('**/api/v1/stocks/*/history*', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     historyCount++;
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makeCandles('2330')) });
+    return route.fulfill({ status: 200, json: makeCandles('2330') });
   });
 
   // Prepopulate localStorage with 5 items
@@ -245,12 +243,12 @@ test('C: Persistence and No quote fan-out on reload', async ({ page }) => {
 test('D: Focus switching between watchlist items', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+    return route.fulfill({ status: 200, json: QUOTE_2330 });
   });
   await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
   await page.route('**/api/v1/stocks/2454/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2454) });
+    return route.fulfill({ status: 200, json: QUOTE_2454 });
   });
   await page.route('**/api/v1/stocks/2454/history*', historyRoute('2454'));
 
@@ -278,7 +276,7 @@ test('D: Focus switching between watchlist items', async ({ page }) => {
 test('E: Remove active stock keeps quote and chart displayed', async ({ page }) => {
   await page.route('**/api/v1/stocks/2330/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+    return route.fulfill({ status: 200, json: QUOTE_2330 });
   });
   await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
 
@@ -310,7 +308,7 @@ test('F: Long watchlist scrolls internally and all items remain reachable', asyn
   // Deterministic single-quote fallback for the boot autofocus on the first item.
   await page.route('**/api/v1/stocks/*/quote', (route) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(QUOTE_2330) });
+    return route.fulfill({ status: 200, json: QUOTE_2330 });
   });
   // The autofocused focus card mounts history UI; keep it deterministic too.
   await page.route('**/api/v1/stocks/2330/history*', historyRoute('2330'));
@@ -356,8 +354,7 @@ test('G: Invalid symbol cannot be added to watchlist', async ({ page }) => {
     expect(new URL(route.request().url()).origin).toBe('http://localhost:3001');
     return route.fulfill({
       status: 404,
-      contentType: 'application/json',
-      body: JSON.stringify({ statusCode: 404, message: 'Stock not found', error: 'Not Found' }),
+      json: { statusCode: 404, message: 'Stock not found', error: 'Not Found' },
     });
   });
 
