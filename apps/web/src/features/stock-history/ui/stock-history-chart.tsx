@@ -8,7 +8,7 @@ import {
   LineStyle,
   createChart,
 } from 'lightweight-charts';
-import type { ISeriesApi, Time } from 'lightweight-charts';
+import type { ISeriesApi, LineData, Time } from 'lightweight-charts';
 import type { Candle, PriceBasis, Timeframe } from '@tw-stock-dashboard/contracts';
 import {
   formatChartCrosshairTime,
@@ -38,12 +38,41 @@ export interface MaVisibility {
   ma60: boolean;
 }
 
+type MaKey = keyof MaVisibility;
+
+interface MaSetting {
+  key: MaKey;
+  color: string;
+}
+
+const MA_SETTINGS: ReadonlyArray<MaSetting> = [
+  { key: 'ma5', color: MA5_COLOR },
+  { key: 'ma10', color: MA10_COLOR },
+  { key: 'ma20', color: MA20_COLOR },
+  { key: 'ma60', color: MA60_COLOR },
+];
+
 const DEFAULT_MA_VISIBILITY: MaVisibility = {
   ma5: true,
   ma10: false,
   ma20: false,
   ma60: false,
 };
+
+function toMaSeriesData(
+  candles: ReadonlyArray<Candle>,
+  key: MaKey,
+  timeframe: Timeframe,
+): LineData<Time>[] {
+  const data: LineData<Time>[] = [];
+  for (const candle of candles) {
+    const value = candle[key];
+    if (value !== null) {
+      data.push({ time: toChartTime(candle.date, timeframe), value });
+    }
+  }
+  return data;
+}
 export function toAveragePriceSeriesData(candles: ReadonlyArray<Candle>, timeframe: Timeframe) {
   return candles
     .filter((candle): candle is Candle & { average: number } => candle.average !== null)
@@ -80,10 +109,7 @@ export function StockHistoryChart({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const ma5SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const ma10SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const ma60SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const maSeriesRef = useRef<Map<MaKey, ISeriesApi<'Line'>> | null>(null);
   const averageSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
   const timeframeRef = useRef<Timeframe>(timeframe);
@@ -138,34 +164,17 @@ export function StockHistoryChart({
       priceLineVisible: false,
       lastValueVisible: true,
     });
-    const ma5Series = chart.addSeries(LineSeries, {
-      color: MA5_COLOR,
-      lineWidth: 2,
-      lineStyle: LineStyle.Dashed,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
-    const ma10Series = chart.addSeries(LineSeries, {
-      color: MA10_COLOR,
-      lineWidth: 2,
-      lineStyle: LineStyle.Dashed,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
-    const ma20Series = chart.addSeries(LineSeries, {
-      color: MA20_COLOR,
-      lineWidth: 2,
-      lineStyle: LineStyle.Dashed,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
-    const ma60Series = chart.addSeries(LineSeries, {
-      color: MA60_COLOR,
-      lineWidth: 2,
-      lineStyle: LineStyle.Dashed,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
+    const maSeries = new Map<MaKey, ISeriesApi<'Line'>>();
+    for (const setting of MA_SETTINGS) {
+      const series = chart.addSeries(LineSeries, {
+        color: setting.color,
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        priceLineVisible: false,
+        lastValueVisible: true,
+      });
+      maSeries.set(setting.key, series);
+    }
 
     candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.22 } });
     volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
@@ -173,22 +182,16 @@ export function StockHistoryChart({
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
-    ma5SeriesRef.current = ma5Series;
-    ma10SeriesRef.current = ma10Series;
-    ma20SeriesRef.current = ma20Series;
     averageSeriesRef.current = averageSeries;
-    ma60SeriesRef.current = ma60Series;
+    maSeriesRef.current = maSeries;
 
     return () => {
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
-      ma5SeriesRef.current = null;
-      ma10SeriesRef.current = null;
-      ma20SeriesRef.current = null;
       averageSeriesRef.current = null;
-      ma60SeriesRef.current = null;
+      maSeriesRef.current = null;
     };
   }, []);
 
@@ -197,19 +200,13 @@ export function StockHistoryChart({
     const candleSeries = candleSeriesRef.current;
     const volumeSeries = volumeSeriesRef.current;
     const averageSeries = averageSeriesRef.current;
-    const ma5Series = ma5SeriesRef.current;
-    const ma10Series = ma10SeriesRef.current;
-    const ma20Series = ma20SeriesRef.current;
-    const ma60Series = ma60SeriesRef.current;
+    const maSeries = maSeriesRef.current;
     if (
       !chart ||
       !candleSeries ||
       !volumeSeries ||
       !averageSeries ||
-      !ma5Series ||
-      !ma10Series ||
-      !ma20Series ||
-      !ma60Series
+      !maSeries
     ) {
       return;
     }
@@ -228,26 +225,9 @@ export function StockHistoryChart({
     );
     volumeSeries.setData(toVolumeSeriesData(candles, timeframe));
     averageSeries.setData(priceBasis === 'average' ? toAveragePriceSeriesData(candles, timeframe) : []);
-    ma5Series.setData(
-      candles
-        .filter((c): c is typeof c & { ma5: number } => c.ma5 !== null)
-        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma5 })),
-    );
-    ma10Series.setData(
-      candles
-        .filter((c): c is typeof c & { ma10: number } => c.ma10 !== null)
-        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma10 })),
-    );
-    ma20Series.setData(
-      candles
-        .filter((c): c is typeof c & { ma20: number } => c.ma20 !== null)
-        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma20 })),
-    );
-    ma60Series.setData(
-      candles
-        .filter((c): c is typeof c & { ma60: number } => c.ma60 !== null)
-        .map((c) => ({ time: toChartTime(c.date, timeframe), value: c.ma60 })),
-    );
+    for (const [key, series] of maSeries) {
+      series.setData(toMaSeriesData(candles, key, timeframe));
+    }
     chart.timeScale().fitContent();
   }, [candles, timeframe, priceBasis]);
 
@@ -256,10 +236,11 @@ export function StockHistoryChart({
   }, [timeframe]);
 
   useEffect(() => {
-    ma5SeriesRef.current?.applyOptions({ visible: maVisibility.ma5 });
-    ma10SeriesRef.current?.applyOptions({ visible: maVisibility.ma10 });
-    ma20SeriesRef.current?.applyOptions({ visible: maVisibility.ma20 });
-    ma60SeriesRef.current?.applyOptions({ visible: maVisibility.ma60 });
+    const maSeries = maSeriesRef.current;
+    if (!maSeries) return;
+    for (const [key, series] of maSeries) {
+      series.applyOptions({ visible: maVisibility[key] });
+    }
   }, [maVisibility]);
 
   return (
