@@ -10,7 +10,7 @@ import {
 import type { WindowCachePolicy } from '../../libs/cache/window-cache.service.js';
 import type { BaseCandle } from './moving-average.js';
 import { OfficialDailyHistoryError, StockHistoryCacheError } from './fugle-history.error.js';
-import { enumerateMonths, taipeiToday } from './history-window.js';
+import { enumerateMonths, mergeCandles, taipeiToday } from './history-window.js';
 
 export const TWSE_STOCK_DAY_URL = 'https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY';
 export const TPEX_TRADING_STOCK_URL = 'https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock';
@@ -48,7 +48,7 @@ export interface OfficialDailyHistoryResult {
   candles: BaseCandle[];
 }
 
-function parseTwseRows(data: unknown): BaseCandle[] {
+function parseRows(data: unknown, volumeMultiplier: 1 | 1000): BaseCandle[] {
   if (!Array.isArray(data)) return [];
   const candles: BaseCandle[] = [];
   for (const row of data) {
@@ -59,42 +59,13 @@ function parseTwseRows(data: unknown): BaseCandle[] {
       const high = parseFiniteNumber(String(row[4]));
       const low = parseFiniteNumber(String(row[5]));
       const close = parseFiniteNumber(String(row[6]));
-      const volume = parseFiniteNumber(String(row[1]));
+      const volume = parseFiniteNumber(String(row[1])) * volumeMultiplier;
       candles.push({ date, open, high, low, close, volume });
     } catch {
       continue;
     }
   }
   return candles;
-}
-
-function parseTpexRows(data: unknown): BaseCandle[] {
-  if (!Array.isArray(data)) return [];
-  const candles: BaseCandle[] = [];
-  for (const row of data) {
-    if (!Array.isArray(row) || row.length < 7) continue;
-    try {
-      const date = parseRocDate(String(row[0]).replace(/\//g, ''));
-      const open = parseFiniteNumber(String(row[3]));
-      const high = parseFiniteNumber(String(row[4]));
-      const low = parseFiniteNumber(String(row[5]));
-      const close = parseFiniteNumber(String(row[6]));
-      const volumeLots = parseFiniteNumber(String(row[1]));
-      const volume = volumeLots * 1000;
-      candles.push({ date, open, high, low, close, volume });
-    } catch {
-      continue;
-    }
-  }
-  return candles;
-}
-
-function dedupeAndSort(candles: BaseCandle[]): BaseCandle[] {
-  const byDate = new Map<string, BaseCandle>();
-  for (const candle of candles) {
-    byDate.set(candle.date, candle);
-  }
-  return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 function parseCachedCandles(value: unknown): BaseCandle[] | undefined {
   if (!Array.isArray(value)) {
@@ -156,8 +127,7 @@ export class OfficialDailyHistoryProvider {
           ? (month: string) => this.fetchTwseMonth(security.symbol, month)
           : (month: string) => this.fetchTpexMonth(security.symbol, month);
       const chunkResults = yield* Effect.all(months.map(fetchMonth), { concurrency: 3 });
-      const merged = chunkResults.flat();
-      const candles = dedupeAndSort(merged);
+      const candles = mergeCandles(chunkResults);
       return {
         symbol: security.symbol,
         market: security.market,
@@ -187,7 +157,7 @@ export class OfficialDailyHistoryProvider {
         if (json.stat !== 'OK' || !Array.isArray(json.data)) {
           throw new Error('TWSE returned an unexpected monthly response');
         }
-        return parseTwseRows(json.data);
+        return parseRows(json.data, 1);
       },
       catch: (cause) => new OfficialDailyHistoryError({ cause }),
     }).pipe(
@@ -221,7 +191,7 @@ export class OfficialDailyHistoryProvider {
         if (json.stat !== 'ok' || !Array.isArray(data)) {
           throw new Error('TPEx returned an unexpected monthly response');
         }
-        return parseTpexRows(data);
+        return parseRows(data, 1000);
       },
       catch: (cause) => new OfficialDailyHistoryError({ cause }),
     }).pipe(
