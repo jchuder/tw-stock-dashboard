@@ -3,7 +3,6 @@ import { Test } from '@nestjs/testing';
 import { PinoLogger } from 'nestjs-pino';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StockQuoteCache } from './stock-quote.cache.js';
 import { StockQuoteModule } from './stock-quote.module.js';
 import { CacheModule } from '../../libs/cache/cache.module.js';
 import { LoggerModule } from '../../libs/observability/logger.module.js';
@@ -93,7 +92,6 @@ describe('stock quote domain logs', () => {
   });
 
   beforeEach(() => {
-    app.get(StockQuoteCache).clear();
     captured.length = 0;
   });
 

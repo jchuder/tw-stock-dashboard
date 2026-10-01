@@ -172,10 +172,6 @@ describe('GET /api/v1/stocks/:symbol/quote', () => {
     await app.close();
   });
 
-  beforeEach(() => {
-    app.get(StockQuoteCache).clear();
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

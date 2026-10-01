@@ -3,7 +3,7 @@ import { Duration, Effect } from 'effect';
 import type { Security } from '@tw-stock-dashboard/contracts';
 import { WindowCacheService } from '../../libs/cache/window-cache.service.js';
 import { monthlyHistoryKey } from '../../libs/cache/window-cache.policies.js';
-import { enumerateMonths } from './history-window.js';
+import { enumerateMonths, mergeCandles } from './history-window.js';
 import { resolveHistoryPolicy } from './official-daily-history.provider.js';
 import { OfficialDailyHistoryError, StockHistoryCacheError } from './fugle-history.error.js';
 import type { AverageBasisCandle } from './moving-average.js';
@@ -130,14 +130,6 @@ function parseRows(data: unknown, month: string): AverageBasisCandle[] {
   });
 }
 
-function dedupeAndSort(candles: AverageBasisCandle[]): AverageBasisCandle[] {
-  const byDate = new Map<string, AverageBasisCandle>();
-  for (const candle of candles) {
-    byDate.set(candle.date, candle);
-  }
-  return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-}
-
 function parseCachedCandles(value: unknown): AverageBasisCandle[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
@@ -191,7 +183,7 @@ export class TpexEsbHistoryProvider {
         symbol: security.symbol,
         market: 'ESB' as const,
         provider: 'tpex-esb' as const,
-        candles: dedupeAndSort(chunkResults.flat()),
+        candles: mergeCandles(chunkResults),
       };
     });
   }
